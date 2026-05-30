@@ -9,9 +9,9 @@ export function PracticeActivityView(props: PracticeActivityViewProps) {
 
   return (
     <div className="card">
-      <h3>Practice Activity</h3>
+      <h3>Flashcard Practice</h3>
       <p>
-        {practiceActivity.title} · {practiceActivity.kind} · next review {new Date(practiceActivity.nextReviewAt).toLocaleString()}
+        {practiceActivity.title} · next review {new Date(practiceActivity.nextReviewAt).toLocaleString()}
       </p>
       <p>{practiceActivity.flashcardSet.instructions}</p>
       <ul>

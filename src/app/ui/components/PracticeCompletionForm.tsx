@@ -57,7 +57,7 @@ export function PracticeCompletionForm(props: PracticeCompletionFormProps) {
 
   return (
     <section className="panel panel-form">
-      <h2>8. Complete Review</h2>
+      <h2>8. Complete Active Review</h2>
       <form onSubmit={handleSubmit}>
         {practiceActivity.flashcardSet.cards.map((card, index) => (
           <div key={card.id} className="response-card">
@@ -81,7 +81,7 @@ export function PracticeCompletionForm(props: PracticeCompletionFormProps) {
             </label>
 
             <label>
-              Confidence
+              How sure are you?
               <select
                 value={responses[card.id]?.confidence ?? "medium"}
                 onChange={(event) =>
@@ -119,7 +119,7 @@ export function PracticeCompletionForm(props: PracticeCompletionFormProps) {
         ))}
 
         <button type="submit" disabled={disabled}>
-          {disabled ? "Recording..." : "Complete active review"}
+          {disabled ? "Saving review..." : "Save active review"}
         </button>
       </form>
 

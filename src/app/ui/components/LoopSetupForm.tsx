@@ -12,20 +12,36 @@ export interface LoopSetupValues {
 }
 
 export interface LoopSetupFormProps {
+  demoTopics?: readonly string[];
   values: LoopSetupValues;
+  onApplyDemoSeed?: () => void;
   onMinutesChange: (day: StudyDay, value: string) => void;
   onValuesChange: (nextValues: LoopSetupValues) => void;
 }
 
 export function LoopSetupForm(props: LoopSetupFormProps) {
-  const { values, onMinutesChange, onValuesChange } = props;
+  const { demoTopics, onApplyDemoSeed, values, onMinutesChange, onValuesChange } = props;
 
   return (
     <section className="panel panel-form">
       <h2>1. Loop Setup</h2>
       <div className="form-stack panel-body">
+        {onApplyDemoSeed ? (
+          <div className="demo-banner">
+            <div>
+              <p className="subtle-heading">Demo seed</p>
+              <p>
+                One learner profile with approved material for {demoTopics?.join(", ") ?? "three topics"}.
+              </p>
+            </div>
+            <button type="button" onClick={onApplyDemoSeed}>
+              Load Year 7 demo
+            </button>
+          </div>
+        ) : null}
+
         <label>
-          Learner
+          Learner name
           <input
             value={values.learnerName}
             onChange={(event) =>
@@ -51,7 +67,7 @@ export function LoopSetupForm(props: LoopSetupFormProps) {
         </label>
 
         <label>
-          Topic
+          Topic to focus on now
           <input
             value={values.topic}
             onChange={(event) =>
@@ -64,7 +80,7 @@ export function LoopSetupForm(props: LoopSetupFormProps) {
         </label>
 
         <label>
-          Learning objective
+          Study goal
           <textarea
             rows={4}
             value={values.objective}

@@ -2,6 +2,7 @@ import Fastify from "fastify";
 import { AssessmentAttemptController } from "../../modules/assessment/AssessmentAttemptController.js";
 import { InitialAssessmentController } from "../../modules/assessment/InitialAssessmentController.js";
 import { MasterDataUploadController } from "../../modules/assessment/MasterDataUploadController.js";
+import { LearningLoopController } from "../../modules/learning/LearningLoopController.js";
 import { StudyPlanController } from "../../modules/planning/StudyPlanController.js";
 import { SqliteLearningLoopRepository } from "../../modules/planning/SqliteLearningLoopRepository.js";
 import { PracticeActivityController } from "../../modules/practice/PracticeActivityController.js";
@@ -9,6 +10,7 @@ import type { AgentRuntime } from "../../modules/runtime/AgentRuntime.js";
 import { FixtureAgentRuntime } from "../../modules/runtime/FixtureAgentRuntime.js";
 import { RelayAgentRuntime } from "../../modules/runtime/RelayAgentRuntime.js";
 import { registerAssessmentRoutes } from "./routes/assessments.js";
+import { registerLearningLoopRoutes } from "./routes/learningLoops.js";
 import { registerMasterDataRoutes } from "./routes/masterData.js";
 import { registerPracticeActivityRoutes } from "./routes/practiceActivities.js";
 import { registerStudyPlanRoutes } from "./routes/studyPlans.js";
@@ -17,6 +19,7 @@ export interface CreateServerControllers {
   agentRuntime?: AgentRuntime;
   assessmentAttemptController?: AssessmentAttemptController;
   initialAssessmentController?: InitialAssessmentController;
+  learningLoopController?: LearningLoopController;
   masterDataUploadController?: MasterDataUploadController;
   practiceActivityController?: PracticeActivityController;
   studyPlanController?: StudyPlanController;
@@ -50,6 +53,8 @@ export async function createServer(controllers: CreateServerControllers = {}) {
     controllers.assessmentAttemptController ?? new AssessmentAttemptController(repository, agentRuntime);
   const masterDataUploadController =
     controllers.masterDataUploadController ?? new MasterDataUploadController(repository);
+  const learningLoopController =
+    controllers.learningLoopController ?? new LearningLoopController(repository);
   const practiceActivityController =
     controllers.practiceActivityController ??
     new PracticeActivityController(repository, undefined, undefined, agentRuntime);
@@ -60,6 +65,7 @@ export async function createServer(controllers: CreateServerControllers = {}) {
 
   await registerStudyPlanRoutes(server, studyPlanController);
   await registerAssessmentRoutes(server, initialAssessmentController, assessmentAttemptController);
+  await registerLearningLoopRoutes(server, learningLoopController);
   await registerMasterDataRoutes(server, masterDataUploadController);
   await registerPracticeActivityRoutes(server, practiceActivityController);
 

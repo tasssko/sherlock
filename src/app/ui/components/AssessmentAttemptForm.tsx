@@ -26,7 +26,7 @@ export function AssessmentAttemptForm(props: AssessmentAttemptFormProps) {
 
   return (
     <section className="panel panel-form">
-      <h2>4. Submit Assessment</h2>
+      <h2>4. Answer the Check-In</h2>
       <form onSubmit={handleSubmit}>
         {assessment.items.map((item, index) => (
           <label key={item.id}>
@@ -45,7 +45,7 @@ export function AssessmentAttemptForm(props: AssessmentAttemptFormProps) {
         ))}
 
         <button type="submit" disabled={disabled}>
-          {disabled ? "Submitting..." : "Submit assessment attempt"}
+          {disabled ? "Checking answers..." : "Finish check-in"}
         </button>
       </form>
 

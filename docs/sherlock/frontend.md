@@ -12,6 +12,8 @@ Principles:
 The current screen intentionally exposes:
 
 - learner loop setup and master-data upload
+- resume from persisted learning-loop state
+- deterministic Year 7 demo seed for fractions, forces, and French vocabulary
 - initial assessment generation and attempt submission
 - workspace metadata
 - learning loop metadata
@@ -27,6 +29,7 @@ Current UI split:
 
 - loop setup form
 - master-data paste form
+- resume and demo controls
 - API adapters
 - assessment attempt form
 - practice activity and completion forms
@@ -39,3 +42,5 @@ Current UI split:
 - event timeline
 
 The frontend does not call Relay routes directly and does not consume Relay task, work plan, artifact, or agent identifiers.
+
+The frontend restores the current learner step from persisted `phase` and `nextAction` data returned by `GET /v1/learning-loops/:id`. It does not infer progress from Relay execution state or internal runtime traces.

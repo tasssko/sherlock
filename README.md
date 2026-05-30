@@ -20,8 +20,8 @@ pnpm dev:api
 pnpm dev:frontend
 ```
 
-The API runs on `http://127.0.0.1:3000`.
-The Vite app runs on `http://127.0.0.1:5173`.
+The API runs on `http://127.0.0.1:3001` in the local example setup.
+The Vite app runs on `http://127.0.0.1:4174`.
 
 ## Current Vertical Slices
 

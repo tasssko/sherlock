@@ -11,7 +11,10 @@ The current implementation targets are intentionally narrow:
 5. Create an adapted study plan that attaches to the same learning loop.
 6. Generate a flashcard practice activity from the diagnosed gaps.
 7. Complete an active review session and update mastery from item-level evidence.
-8. Return learner-facing projections with `learningLoopId`, `phase`, `nextAction`, and the relevant domain state.
-9. Keep Relay behind the internal `AgentRuntime` boundary.
+8. Resume a saved learning loop through `GET /v1/learning-loops/:id` and continue the correct next learner step after refresh.
+9. Return learner-facing projections with `learningLoopId`, `phase`, `nextAction`, and the relevant domain state.
+10. Keep Relay behind the internal `AgentRuntime` boundary.
+
+The UI includes a deterministic Year 7 demo seed so the fractions, forces, and French vocabulary flow can be demonstrated consistently without exposing Relay runtime details.
 
 This foundation is designed to grow without reworking the core model every time a new education feature is added.

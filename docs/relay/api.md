@@ -17,7 +17,7 @@ loop.study uses Relay only as an agent/runtime execution boundary. loop.study re
 
 Environment variables referenced by the current server/runtime:
 
-- `PORT`: API listen port when running `src/app/api/server.ts` directly. Defaults to `3000`.
+- `PORT`: API listen port when running `src/app/api/server.ts` directly. Local examples in this repo use `3001`.
 - `POWERTRAIN_ADMIN_DEV_URL`: if set, HTML workspace routes load the admin app from a Vite dev server instead of `/ui/admin.js` and `/ui/admin.css`.
 - `POWERTRAIN_AGENT_RUNTIME_MODE`: `llm` enables LLM-backed agent runtime; any other value falls back to `noop`.
 - `POWERTRAIN_INTENT_INFERENCE_MODE`: `llm` enables LLM-backed intent inference; any other value falls back to `static`.

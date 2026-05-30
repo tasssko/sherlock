@@ -11,9 +11,9 @@ export function NextActionView(props: NextActionViewProps) {
 
   return (
     <div className="card accent-card">
-      <h3>Next Action</h3>
+      <h3>What to do next</h3>
       <p>
-        Loop {learningLoopId} · phase {phase}
+        Study loop {learningLoopId} · phase {phase}
       </p>
       <p>
         <strong>{nextAction.kind}</strong>

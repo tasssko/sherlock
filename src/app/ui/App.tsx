@@ -1,39 +1,22 @@
-import { useState, type FormEvent } from "react";
-import type { DomainEvent } from "../../domain/primitives/Event.js";
-import type {
-  AssessmentAttemptResponse,
-  InitialAssessmentResponse
-} from "../../domain/study/AssessmentGeneration.js";
+import { useEffect, useState, type FormEvent } from "react";
 import type { UploadMasterDataCommand } from "../../domain/study/MasterDataUpload.js";
-import type {
-  CompletePracticeActivityCommand,
-  PracticeActivityCompletionResponse,
-  PracticeActivityResponse
-} from "../../domain/study/PracticeActivities.js";
-import type { StudyPlanResponse } from "../../domain/study/StudyPlanning.js";
+import type { CompletePracticeActivityCommand } from "../../domain/study/PracticeActivities.js";
+import type { LearningLoopResumeResponse } from "../../domain/study/LearningLoops.js";
 import type { StudyDay } from "../../domain/study/StudySchedule.js";
 import {
   completePracticeActivity,
   generateInitialAssessment,
   generatePracticeActivity,
   generateStudyPlan,
+  getLearningLoop,
   submitAssessmentAttempt,
   uploadMasterData
 } from "./api/loopStudyClient.js";
-import { ArtifactView } from "./components/ArtifactView.js";
-import { AssessmentAttemptForm } from "./components/AssessmentAttemptForm.js";
-import { EventTimeline } from "./components/EventTimeline.js";
-import { LearningLoopView } from "./components/LearningLoopView.js";
-import { LoopSetupForm, type LoopSetupValues } from "./components/LoopSetupForm.js";
-import { MasterDataPasteForm, type MasterDataPasteValues } from "./components/MasterDataPasteForm.js";
-import { NextActionView } from "./components/NextActionView.js";
-import { PracticeActivityView } from "./components/PracticeActivityView.js";
-import { PracticeCompletionForm } from "./components/PracticeCompletionForm.js";
-import { TaskGraphView } from "./components/TaskGraphView.js";
-import { WorkPlanView } from "./components/WorkPlanView.js";
-import { WorkspaceSnapshotView } from "./components/WorkspaceSnapshotView.js";
+import { LoopJourneyPage } from "./components/LoopJourneyPage.js";
+import { year7DemoLoopSetup, year7DemoMasterData, year7DemoTopics } from "./demo/year7DemoSeed.js";
 
-const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:3000";
+const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:3001";
+const lastLoopStorageKey = "loop.study:last-learning-loop-id";
 
 const initialMinutes: Record<StudyDay, number> = {
   Monday: 30,
@@ -45,15 +28,22 @@ const initialMinutes: Record<StudyDay, number> = {
   Sunday: 0
 };
 
-const initialLoopValues: LoopSetupValues = {
-  learnerName: "Year 7 learner",
-  yearGroup: "Year 7",
-  topic: "fractions",
-  objective: "Build secure understanding of fractions through diagnosis, short study sessions, and active review.",
-  questionCount: 5,
-  practiceCardCount: 5,
-  availableMinutesByDay: initialMinutes
-};
+export interface LoopSetupValues {
+  learnerName: string;
+  objective: string;
+  practiceCardCount: number;
+  questionCount: number;
+  topic: string;
+  yearGroup: string;
+  availableMinutesByDay: Record<StudyDay, number>;
+}
+
+export interface MasterDataPasteValues {
+  sourceName: string;
+  lines: string;
+}
+
+const initialLoopValues: LoopSetupValues = year7DemoLoopSetup;
 
 const initialMasterDataValues: MasterDataPasteValues = {
   sourceName: "Year 7 Fractions Pack",
@@ -69,28 +59,78 @@ const initialMasterDataValues: MasterDataPasteValues = {
 export function App() {
   const [loopValues, setLoopValues] = useState(initialLoopValues);
   const [masterDataValues, setMasterDataValues] = useState(initialMasterDataValues);
+  const [resumeLoopId, setResumeLoopId] = useState("");
+  const [resumePending, setResumePending] = useState(false);
+  const [resumeError, setResumeError] = useState<string | null>(null);
+  const [loopState, setLoopState] = useState<LearningLoopResumeResponse | null>(null);
   const [masterDataStatus, setMasterDataStatus] = useState<string | null>(null);
   const [masterDataPending, setMasterDataPending] = useState(false);
   const [masterDataError, setMasterDataError] = useState<string | null>(null);
-  const [assessmentResult, setAssessmentResult] = useState<InitialAssessmentResponse | null>(null);
   const [assessmentPending, setAssessmentPending] = useState(false);
   const [assessmentError, setAssessmentError] = useState<string | null>(null);
-  const [attemptResult, setAttemptResult] = useState<AssessmentAttemptResponse | null>(null);
   const [attemptPending, setAttemptPending] = useState(false);
   const [attemptError, setAttemptError] = useState<string | null>(null);
-  const [studyPlanResult, setStudyPlanResult] = useState<StudyPlanResponse | null>(null);
   const [studyPlanPending, setStudyPlanPending] = useState(false);
   const [studyPlanError, setStudyPlanError] = useState<string | null>(null);
-  const [practiceResult, setPracticeResult] = useState<PracticeActivityResponse | null>(null);
   const [practicePending, setPracticePending] = useState(false);
   const [practiceError, setPracticeError] = useState<string | null>(null);
-  const [completionResult, setCompletionResult] = useState<PracticeActivityCompletionResponse | null>(null);
   const [completionPending, setCompletionPending] = useState(false);
   const [completionError, setCompletionError] = useState<string | null>(null);
-  const [timelineEvents, setTimelineEvents] = useState<readonly DomainEvent[]>([]);
 
-  function appendEvents(events: readonly DomainEvent[]) {
-    setTimelineEvents((current) => [...current, ...events]);
+  async function loadLearningLoop(learningLoopId: string) {
+    setResumePending(true);
+    setResumeError(null);
+
+    try {
+      const response = await getLearningLoop(apiBaseUrl, learningLoopId);
+      setLoopState(response);
+      setResumeLoopId(learningLoopId);
+      setLoopValues((current) => ({
+        ...current,
+        learnerName: response.workspace.learner.name,
+        yearGroup: response.workspace.learner.yearGroup,
+        topic: response.learningLoop.topic,
+        objective: response.learningLoop.objective,
+        availableMinutesByDay: {
+          ...initialMinutes,
+          ...response.workspace.learner.availableMinutesByDay
+        }
+      }));
+      window.localStorage.setItem(lastLoopStorageKey, learningLoopId);
+      const url = new URL(window.location.href);
+      url.searchParams.set("loop", learningLoopId);
+      window.history.replaceState({}, "", url);
+      return response;
+    } catch (requestError) {
+      const message =
+        requestError instanceof Error ? requestError.message : "Unknown request failure.";
+      setResumeError(message);
+      throw requestError;
+    } finally {
+      setResumePending(false);
+    }
+  }
+
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const searchLoopId = url.searchParams.get("loop");
+    const storedLoopId = window.localStorage.getItem(lastLoopStorageKey);
+    const loopId = searchLoopId ?? storedLoopId;
+
+    if (!loopId) {
+      return;
+    }
+
+    void loadLearningLoop(loopId);
+  }, []);
+
+  async function handleResumeSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!resumeLoopId.trim()) {
+      return;
+    }
+
+    await loadLearningLoop(resumeLoopId.trim());
   }
 
   function parseMasterDataItems(
@@ -132,7 +172,7 @@ export function App() {
         items: parseMasterDataItems(loopValues.topic, masterDataValues.lines)
       });
       setMasterDataStatus(
-        `${uploaded.items.length} approved master-data items loaded from ${uploaded.source.name}.`
+        `${uploaded.items.length} study prompts are ready in ${uploaded.source.name}.`
       );
     } catch (requestError) {
       setMasterDataError(
@@ -154,12 +194,7 @@ export function App() {
         topic: loopValues.topic,
         questionCount: loopValues.questionCount
       });
-      setAssessmentResult(response);
-      setAttemptResult(null);
-      setStudyPlanResult(null);
-      setPracticeResult(null);
-      setCompletionResult(null);
-      setTimelineEvents(response.events);
+      await loadLearningLoop(response.learningLoopId);
     } catch (requestError) {
       setAssessmentError(
         requestError instanceof Error ? requestError.message : "Unknown request failure."
@@ -172,7 +207,7 @@ export function App() {
   async function handleAssessmentAttemptSubmit(
     responses: readonly { answer: string; itemId: string }[]
   ) {
-    if (!assessmentResult) {
+    if (!loopState?.currentAssessment) {
       return;
     }
 
@@ -181,11 +216,10 @@ export function App() {
 
     try {
       const response = await submitAssessmentAttempt(apiBaseUrl, {
-        assessmentId: assessmentResult.assessment.id,
+        assessmentId: loopState.currentAssessment.id,
         responses
       });
-      setAttemptResult(response);
-      appendEvents(response.events);
+      await loadLearningLoop(response.learningLoopId);
     } catch (requestError) {
       setAttemptError(
         requestError instanceof Error ? requestError.message : "Unknown request failure."
@@ -207,8 +241,7 @@ export function App() {
         focusTopics: [loopValues.topic],
         availableMinutesByDay: loopValues.availableMinutesByDay
       });
-      setStudyPlanResult(response);
-      appendEvents(response.events);
+      await loadLearningLoop(response.learningLoopId);
     } catch (requestError) {
       setStudyPlanError(
         requestError instanceof Error ? requestError.message : "Unknown request failure."
@@ -219,7 +252,7 @@ export function App() {
   }
 
   async function handlePracticeGenerate() {
-    if (!assessmentResult) {
+    if (!loopState) {
       return;
     }
 
@@ -228,13 +261,11 @@ export function App() {
 
     try {
       const response = await generatePracticeActivity(apiBaseUrl, {
-        learningLoopId: assessmentResult.learningLoop.id,
+        learningLoopId: loopState.learningLoopId,
         kind: "flashcard_set",
         cardCount: loopValues.practiceCardCount
       });
-      setPracticeResult(response);
-      setCompletionResult(null);
-      appendEvents(response.events);
+      await loadLearningLoop(response.learningLoopId);
     } catch (requestError) {
       setPracticeError(
         requestError instanceof Error ? requestError.message : "Unknown request failure."
@@ -247,7 +278,7 @@ export function App() {
   async function handlePracticeCompletionSubmit(
     responses: CompletePracticeActivityCommand["responses"]
   ) {
-    if (!practiceResult) {
+    if (!loopState?.currentPracticeActivity) {
       return;
     }
 
@@ -256,11 +287,10 @@ export function App() {
 
     try {
       const response = await completePracticeActivity(apiBaseUrl, {
-        practiceActivityId: practiceResult.practiceActivity.id,
+        practiceActivityId: loopState.currentPracticeActivity.id,
         responses
       });
-      setCompletionResult(response);
-      appendEvents(response.events);
+      await loadLearningLoop(response.learningLoopId);
     } catch (requestError) {
       setCompletionError(
         requestError instanceof Error ? requestError.message : "Unknown request failure."
@@ -282,190 +312,76 @@ export function App() {
     }));
   }
 
-  const latestProjection =
-    completionResult ?? practiceResult ?? studyPlanResult ?? attemptResult ?? assessmentResult;
-  const latestKnowledgeGaps = studyPlanResult?.knowledgeGaps ?? attemptResult?.knowledgeGaps ?? [];
-  const remainingGapIds = completionResult?.activeReviewSession.remainingKnowledgeGapIds ?? [];
-  const remainingGaps = latestKnowledgeGaps.filter((gap) => remainingGapIds.includes(gap.id));
-  const latestLearningLoop = latestProjection?.learningLoop;
-  const latestMasteryProfile =
-    completionResult?.masteryProfile ?? studyPlanResult?.masteryProfile ?? attemptResult?.masteryProfile;
-  const latestWorkspace = latestProjection?.workspace;
-  const latestAgent = practiceResult?.agent ?? studyPlanResult?.agent ?? assessmentResult?.agent;
+  function applyDemoSeed() {
+    setLoopValues(year7DemoLoopSetup);
+    setMasterDataValues({
+      sourceName: year7DemoMasterData.sourceName,
+      lines: year7DemoMasterData.items
+        .filter((item) => item.topic === "fractions")
+        .map(
+          (item) =>
+            `${item.prompt} || ${item.canonicalAnswer} || ${item.visibleMaterial} || ${item.keywords?.join(", ") ?? ""}`
+        )
+        .join("\n")
+    });
+    setMasterDataStatus(
+      "The Year 7 demo is loaded. Save the study prompts to move into the first round."
+    );
+  }
+
+  async function handleDemoUpload() {
+    setMasterDataPending(true);
+    setMasterDataError(null);
+
+    try {
+      const uploaded = await uploadMasterData(apiBaseUrl, year7DemoMasterData);
+      setMasterDataStatus(
+        `${uploaded.items.length} demo prompts are ready across ${year7DemoTopics.join(", ")}.`
+      );
+    } catch (requestError) {
+      setMasterDataError(
+        requestError instanceof Error ? requestError.message : "Unknown request failure."
+      );
+    } finally {
+      setMasterDataPending(false);
+    }
+  }
 
   return (
-    <div className="shell">
-      <header className="hero">
-        <p className="eyebrow">loop.study MVP</p>
-        <h1>One learner loop from source material to next review.</h1>
-        <p className="lede">
-          This golden path keeps Relay behind the runtime boundary and shows the learner-facing loop:
-          source material, diagnostic assessment, gaps, adapted plan, flashcard practice, active review,
-          and the next review action.
-        </p>
-      </header>
-
-      <main className="grid">
-        <div className="control-stack">
-          <LoopSetupForm
-            values={loopValues}
-            onMinutesChange={setDayMinutes}
-            onValuesChange={setLoopValues}
-          />
-          <MasterDataPasteForm
-            disabled={masterDataPending}
-            error={masterDataError}
-            status={masterDataStatus}
-            values={masterDataValues}
-            onSubmit={handleMasterDataSubmit}
-            onValuesChange={setMasterDataValues}
-          />
-
-          <section className="panel panel-form">
-            <h2>3. Generate Initial Assessment</h2>
-            <div className="panel-body">
-              <button type="button" disabled={assessmentPending} onClick={handleAssessmentGenerate}>
-                {assessmentPending ? "Generating..." : "Create loop and generate assessment"}
-              </button>
-              {assessmentError ? <p className="error">{assessmentError}</p> : null}
-            </div>
-          </section>
-
-          {assessmentResult ? (
-            <AssessmentAttemptForm
-              key={assessmentResult.assessment.id}
-              assessment={assessmentResult.assessment}
-              disabled={attemptPending}
-              error={attemptError}
-              onSubmit={handleAssessmentAttemptSubmit}
-            />
-          ) : null}
-
-          {attemptResult ? (
-            <section className="panel panel-form">
-              <h2>6. Generate Adapted Study Plan</h2>
-              <div className="panel-body">
-                <button type="button" disabled={studyPlanPending} onClick={handleStudyPlanGenerate}>
-                  {studyPlanPending ? "Generating..." : "Generate adapted study plan"}
-                </button>
-                {studyPlanError ? <p className="error">{studyPlanError}</p> : null}
-              </div>
-            </section>
-          ) : null}
-
-          {studyPlanResult ? (
-            <section className="panel panel-form">
-              <h2>7. Generate Flashcard Practice</h2>
-              <div className="panel-body">
-                <button type="button" disabled={practicePending} onClick={handlePracticeGenerate}>
-                  {practicePending ? "Generating..." : "Generate flashcard practice activity"}
-                </button>
-                {practiceError ? <p className="error">{practiceError}</p> : null}
-              </div>
-            </section>
-          ) : null}
-
-          {practiceResult ? (
-            <PracticeCompletionForm
-              key={practiceResult.practiceActivity.id}
-              disabled={completionPending}
-              error={completionError}
-              practiceActivity={practiceResult.practiceActivity}
-              onSubmit={handlePracticeCompletionSubmit}
-            />
-          ) : null}
-        </div>
-
-        <section className="panel panel-result">
-          <h2>Golden Path Snapshot</h2>
-          {!latestProjection ? (
-            <p className="placeholder">
-              Start with loop setup and master data. The learner-facing route responses will fill in
-              the loop state step by step.
-            </p>
-          ) : (
-            <div className="result-stack">
-              <NextActionView
-                learningLoopId={latestProjection.learningLoopId}
-                phase={latestProjection.phase}
-                nextAction={latestProjection.nextAction}
-              />
-
-              {latestWorkspace && latestAgent ? (
-                <WorkspaceSnapshotView agent={latestAgent} workspace={latestWorkspace} />
-              ) : null}
-
-              {latestLearningLoop ? (
-                <LearningLoopView
-                  knowledgeGaps={remainingGaps.length > 0 ? remainingGaps : latestKnowledgeGaps}
-                  learningLoop={latestLearningLoop}
-                  masteryProfile={latestMasteryProfile}
-                />
-              ) : null}
-
-              {assessmentResult ? (
-                <div className="card">
-                  <h3>Initial Assessment</h3>
-                  <p>{assessmentResult.artifact.content.instructions}</p>
-                  <ul>
-                    {assessmentResult.artifact.content.items.map((item) => (
-                      <li key={item.id}>
-                        <strong>{item.prompt}</strong>
-                        <span>Difficulty: {item.difficulty}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ) : null}
-
-              {attemptResult ? (
-                <div className="card">
-                  <h3>Diagnosed Gaps</h3>
-                  <p>Assessment score: {Math.round(attemptResult.evaluation.score * 100)}%</p>
-                  <ul>
-                    {attemptResult.knowledgeGaps.map((gap) => (
-                      <li key={gap.id}>
-                        <strong>{gap.topic}</strong>
-                        <span>{gap.description}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ) : null}
-
-              {studyPlanResult ? (
-                <>
-                  <TaskGraphView
-                    blockedTaskIds={studyPlanResult.blockedTaskIds}
-                    taskGraph={studyPlanResult.taskGraph}
-                    tasks={studyPlanResult.tasks}
-                  />
-                  <WorkPlanView workPlan={studyPlanResult.workPlan} />
-                  <ArtifactView artifact={studyPlanResult.artifact} />
-                </>
-              ) : null}
-
-              {practiceResult ? <PracticeActivityView practiceActivity={practiceResult.practiceActivity} /> : null}
-
-              {completionResult ? (
-                <div className="card">
-                  <h3>9. Review Outcome</h3>
-                  <p>{completionResult.activeReviewSession.evidenceSummary}</p>
-                  <p>
-                    Mastery score: {Math.round(completionResult.activeReviewSession.masteryScore * 100)}% ·
-                    Next review {new Date(completionResult.activeReviewSession.nextReviewAt).toLocaleString()}
-                  </p>
-                  <p>
-                    Remaining gaps: {remainingGaps.length > 0 ? remainingGaps.map((gap) => gap.description).join(" | ") : "None"}
-                  </p>
-                </div>
-              ) : null}
-
-              <EventTimeline events={timelineEvents} />
-            </div>
-          )}
-        </section>
-      </main>
-    </div>
+    <LoopJourneyPage
+      assessmentError={assessmentError}
+      assessmentPending={assessmentPending}
+      attemptError={attemptError}
+      attemptPending={attemptPending}
+      completionError={completionError}
+      completionPending={completionPending}
+      demoTopics={year7DemoTopics}
+      loopState={loopState}
+      loopValues={loopValues}
+      masterDataError={masterDataError}
+      masterDataPending={masterDataPending}
+      masterDataStatus={masterDataStatus}
+      masterDataValues={masterDataValues}
+      practiceError={practiceError}
+      practicePending={practicePending}
+      resumeError={resumeError}
+      resumeLoopId={resumeLoopId}
+      resumePending={resumePending}
+      studyPlanError={studyPlanError}
+      studyPlanPending={studyPlanPending}
+      onApplyDemoSeed={applyDemoSeed}
+      onAssessmentSubmit={handleAssessmentAttemptSubmit}
+      onBuildPlan={handleStudyPlanGenerate}
+      onDayMinutesChange={setDayMinutes}
+      onDemoUpload={handleDemoUpload}
+      onGenerateCheckUp={handleAssessmentGenerate}
+      onGenerateReview={handlePracticeGenerate}
+      onLoopValuesChange={setLoopValues}
+      onMasterDataSubmit={handleMasterDataSubmit}
+      onMasterDataValuesChange={setMasterDataValues}
+      onResumeLoopIdChange={setResumeLoopId}
+      onResumeSubmit={handleResumeSubmit}
+      onReviewSubmit={handlePracticeCompletionSubmit}
+    />
   );
 }

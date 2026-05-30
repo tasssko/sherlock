@@ -1,12 +1,13 @@
 :root {
   font-family: "Avenir Next", "Segoe UI", sans-serif;
-  color: #13231d;
+  color: #172015;
   background:
-    radial-gradient(circle at top left, rgba(255, 233, 188, 0.85), transparent 32rem),
-    linear-gradient(180deg, #f3ead6 0%, #efe6d0 48%, #e1d7bd 100%);
+    radial-gradient(circle at top left, rgba(255, 216, 144, 0.85), transparent 28rem),
+    radial-gradient(circle at bottom right, rgba(153, 187, 149, 0.25), transparent 26rem),
+    linear-gradient(180deg, #efe2c1 0%, #e3d4b0 45%, #d4caa8 100%);
+  color-scheme: light;
   line-height: 1.5;
   font-weight: 400;
-  color-scheme: light;
 }
 
 * {
@@ -25,226 +26,384 @@ textarea {
   font: inherit;
 }
 
-.shell {
-  min-height: 100vh;
-  padding: 2rem 1.25rem 3rem;
+button {
+  border: none;
 }
 
-.hero {
-  max-width: 62rem;
-  margin: 0 auto 2rem;
-  padding: 2rem;
-  border: 1px solid rgba(19, 35, 29, 0.14);
-  background: rgba(255, 250, 240, 0.72);
-  backdrop-filter: blur(8px);
-  box-shadow: 0 1rem 3rem rgba(77, 56, 18, 0.12);
+input,
+select,
+textarea {
+  width: 100%;
+  padding: 0.9rem 1rem;
+  border: 1px solid rgba(23, 32, 21, 0.12);
+  border-radius: 1rem;
+  background: rgba(255, 252, 245, 0.9);
+  color: inherit;
+}
+
+textarea {
+  resize: vertical;
+}
+
+label {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.journey-shell {
+  min-height: 100vh;
+  padding: 1.25rem 1rem 4rem;
+}
+
+.loop-header {
+  display: grid;
+  gap: 1rem;
+  max-width: 84rem;
+  margin: 0 auto 1.5rem;
+  padding: 1.5rem;
+  border: 1px solid rgba(23, 32, 21, 0.12);
+  border-radius: 2rem;
+  background: rgba(255, 248, 234, 0.76);
+  box-shadow: 0 1.2rem 3rem rgba(73, 48, 10, 0.12);
+  backdrop-filter: blur(12px);
 }
 
 .eyebrow {
-  margin: 0 0 0.5rem;
-  font-size: 0.8rem;
+  margin: 0 0 0.45rem;
+  font-size: 0.78rem;
   letter-spacing: 0.18em;
   text-transform: uppercase;
-  color: #7f4f20;
+  color: #8f5d18;
 }
 
-.hero h1 {
+.loop-header h1 {
   margin: 0;
-  max-width: 16ch;
-  font-family: "Iowan Old Style", "Palatino Linotype", Georgia, serif;
-  font-size: clamp(2.8rem, 6vw, 5rem);
+  max-width: 11ch;
+  font-family: "Fraunces", "Iowan Old Style", Georgia, serif;
+  font-size: clamp(2.7rem, 7vw, 5rem);
   line-height: 0.95;
 }
 
 .lede {
   max-width: 42rem;
-  margin: 1rem 0 0;
+  margin: 0.9rem 0 0;
   font-size: 1.05rem;
+  color: rgba(23, 32, 21, 0.82);
 }
 
-.grid {
+.header-tags,
+.checkpoint-row,
+.utility-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+}
+
+.tag,
+.checkpoint-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.55rem 0.8rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.64);
+  color: rgba(23, 32, 21, 0.82);
+}
+
+.header-utilities {
   display: grid;
-  gap: 1.25rem;
-  max-width: 72rem;
+  gap: 0.85rem;
+  padding: 1rem;
+  border-radius: 1.5rem;
+  background: rgba(35, 52, 43, 0.08);
+}
+
+.utility-form {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.primary-cta,
+.secondary-cta {
+  padding: 0.95rem 1.2rem;
+  border-radius: 999px;
+  cursor: pointer;
+  transition:
+    transform 160ms ease,
+    opacity 160ms ease,
+    background 160ms ease;
+}
+
+.primary-cta {
+  background: #21372b;
+  color: #f8f2e6;
+  box-shadow: 0 0.9rem 1.8rem rgba(33, 55, 43, 0.22);
+}
+
+.secondary-cta {
+  background: rgba(255, 255, 255, 0.7);
+  color: #21372b;
+}
+
+.primary-cta:hover,
+.secondary-cta:hover {
+  transform: translateY(-1px);
+}
+
+.primary-cta:disabled,
+.secondary-cta:disabled {
+  opacity: 0.7;
+  cursor: wait;
+  transform: none;
+}
+
+.journey-layout {
+  display: grid;
+  gap: 1rem;
+  max-width: 84rem;
   margin: 0 auto;
 }
 
-.control-stack {
+.progress-rail {
+  align-self: start;
+}
+
+.rail-card {
+  padding: 1rem;
+  border: 1px solid rgba(23, 32, 21, 0.12);
+  border-radius: 1.75rem;
+  background: rgba(255, 248, 234, 0.68);
+  box-shadow: 0 0.8rem 2rem rgba(73, 48, 10, 0.08);
+}
+
+.rail-title {
+  margin: 0 0 0.85rem;
+  font-family: "Fraunces", "Iowan Old Style", Georgia, serif;
+  font-size: 1.25rem;
+}
+
+.rail-list {
   display: grid;
-  gap: 1.25rem;
-}
-
-.panel {
-  border: 1px solid rgba(19, 35, 29, 0.14);
-  background: rgba(255, 248, 237, 0.84);
-  box-shadow: 0 1rem 2.5rem rgba(77, 56, 18, 0.08);
-}
-
-.panel h2 {
+  gap: 0.65rem;
   margin: 0;
-  padding: 1rem 1.2rem 0;
-  font-family: "Iowan Old Style", "Palatino Linotype", Georgia, serif;
-  font-size: 1.6rem;
+  padding: 0;
+  list-style: none;
 }
 
-.panel-form form {
+.rail-item {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.7rem;
+  align-items: start;
+  padding: 0.75rem 0.8rem;
+  border-radius: 1rem;
+}
+
+.rail-item p,
+.rail-item span {
+  margin: 0;
+}
+
+.rail-index {
+  display: inline-flex;
+  justify-content: center;
+  min-width: 1.6rem;
+  font-weight: 700;
+}
+
+.rail-item[data-stage-state="current"] {
+  background: rgba(33, 55, 43, 0.12);
+}
+
+.rail-item[data-stage-state="complete"],
+.rail-item[data-stage-state="needs_attention"] {
+  background: rgba(255, 255, 255, 0.44);
+}
+
+.rail-item[data-stage-state="locked"] {
+  opacity: 0.48;
+}
+
+.journey-column {
   display: grid;
   gap: 1rem;
-  padding: 1.2rem;
 }
 
-.panel-body {
+.journey-stage {
+  padding: 1rem;
+  border: 1px solid rgba(23, 32, 21, 0.12);
+  border-radius: 1.8rem;
+  background: rgba(255, 249, 239, 0.78);
+  box-shadow: 0 0.7rem 1.8rem rgba(73, 48, 10, 0.08);
+  scroll-margin-top: 1rem;
+  transition:
+    transform 220ms ease,
+    opacity 220ms ease,
+    box-shadow 220ms ease,
+    padding 220ms ease;
+}
+
+.journey-stage-head {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.journey-stage h2,
+.stage-label,
+.stage-summary,
+.state-pill {
+  margin: 0;
+}
+
+.journey-stage h2 {
+  font-family: "Fraunces", "Iowan Old Style", Georgia, serif;
+  font-size: 1.55rem;
+}
+
+.stage-label {
+  margin-bottom: 0.2rem;
+  color: #8f5d18;
+  font-size: 0.88rem;
+  letter-spacing: 0.04em;
+}
+
+.state-pill {
+  padding: 0.45rem 0.7rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.72);
+  color: rgba(23, 32, 21, 0.7);
+  white-space: nowrap;
+}
+
+.stage-summary {
+  margin-top: 0.75rem;
+  color: rgba(23, 32, 21, 0.8);
+}
+
+.journey-stage[data-stage-state="current"] {
+  padding: 1.2rem;
+  border-color: rgba(33, 55, 43, 0.24);
+  box-shadow: 0 1.4rem 3rem rgba(33, 55, 43, 0.14);
+  background: rgba(255, 251, 244, 0.92);
+}
+
+.journey-stage[data-stage-state="locked"] {
+  opacity: 0.62;
+}
+
+.journey-stage[data-stage-state="needs_attention"] {
+  border-color: rgba(173, 112, 17, 0.3);
+  background: rgba(255, 244, 224, 0.82);
+}
+
+.collapsed-preview {
+  margin-top: 0.85rem;
+}
+
+.current-stage-panel {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid rgba(23, 32, 21, 0.1);
+}
+
+.stage-form,
+.journey-list {
   display: grid;
   gap: 1rem;
-  padding: 1.2rem;
 }
 
-.panel-form label {
+.field-grid,
+.minutes-grid {
   display: grid;
-  gap: 0.35rem;
-}
-
-.panel-form input,
-.panel-form select,
-.panel-form textarea {
-  width: 100%;
-  padding: 0.8rem 0.9rem;
-  border: 1px solid rgba(19, 35, 29, 0.18);
-  background: rgba(255, 255, 255, 0.75);
-}
-
-.form-stack {
-  display: grid;
-  gap: 1.25rem;
-}
-
-.inline-grid {
-  display: grid;
-  gap: 0.75rem;
-  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  gap: 0.85rem;
 }
 
 .minutes-grid {
-  display: grid;
-  gap: 0.75rem;
   grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
 }
 
+.journey-note,
 .hint,
 .status,
-.subtle-heading {
+.subtle-heading,
+.field-caption {
   margin: 0;
-  color: rgba(19, 35, 29, 0.76);
+  color: rgba(23, 32, 21, 0.72);
+}
+
+.field-caption {
+  display: block;
+}
+
+.split-callout,
+.score-banner,
+.completion-card,
+.review-card,
+.list-card {
+  padding: 1rem;
+  border-radius: 1.35rem;
+  background: rgba(255, 255, 255, 0.68);
+}
+
+.score-banner strong,
+.next-loop-time {
+  font-family: "Fraunces", "Iowan Old Style", Georgia, serif;
+  font-size: clamp(2rem, 4vw, 3rem);
+  line-height: 1;
+}
+
+.compact-list {
+  gap: 0.75rem;
+}
+
+.list-title {
+  margin: 0 0 0.3rem;
+  font-weight: 700;
+}
+
+.checkpoint-chip-warning {
+  background: rgba(255, 232, 193, 0.95);
+  color: #7a4d10;
+}
+
+.checkpoint-chip-success {
+  background: rgba(221, 243, 220, 0.92);
+  color: #1d5d2f;
+}
+
+.error {
+  margin: 0;
+  color: #8b1e1e;
+}
+
+.subtle-heading {
+  font-size: 0.88rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .hint code {
   font-family: "SFMono-Regular", "Menlo", monospace;
 }
 
-.panel-form button {
-  padding: 0.95rem 1.2rem;
-  border: none;
-  background: #233d32;
-  color: #f7f0e2;
-  cursor: pointer;
-}
-
-.panel-form button:disabled {
-  opacity: 0.7;
-  cursor: wait;
-}
-
-.panel-result {
-  padding-bottom: 1.2rem;
-}
-
-.result-stack {
-  display: grid;
-  gap: 1rem;
-  padding: 1.2rem;
-}
-
-.card {
-  padding: 1rem;
-  border-left: 4px solid #b97832;
-  background: rgba(255, 255, 255, 0.72);
-}
-
-.accent-card {
-  border-left-color: #233d32;
-  background: rgba(240, 247, 243, 0.78);
-}
-
-.card h3 {
-  margin-top: 0;
-  margin-bottom: 0.6rem;
-}
-
-.card ul {
-  margin: 0;
-  padding-left: 1.2rem;
-}
-
-.card li + li {
-  margin-top: 0.5rem;
-}
-
-.card li span {
-  display: block;
-  margin-top: 0.2rem;
-}
-
-.graph-list,
-.timeline-list {
-  list-style: none;
-  padding-left: 0;
-}
-
-.graph-list li,
-.timeline-list li {
-  padding: 0.75rem 0;
-  border-top: 1px solid rgba(19, 35, 29, 0.12);
-}
-
-.graph-list li:first-child,
-.timeline-list li:first-child {
-  border-top: none;
-  padding-top: 0;
-}
-
-.placeholder,
-.error {
-  padding: 1.2rem;
-}
-
-.status {
-  padding: 0 1.2rem 1.2rem;
-}
-
-.error {
-  color: #8b1e1e;
-}
-
-.response-card {
-  padding: 1rem;
-  border: 1px solid rgba(19, 35, 29, 0.1);
-  background: rgba(255, 252, 247, 0.7);
-}
-
-.response-title {
-  margin-top: 0;
-  margin-bottom: 0.4rem;
-  font-weight: 600;
-}
-
-@media (min-width: 960px) {
-  .grid {
-    grid-template-columns: minmax(18rem, 26rem) 1fr;
+@media (min-width: 900px) {
+  .loop-header {
+    grid-template-columns: 1.5fr minmax(20rem, 26rem);
     align-items: start;
   }
 
-  .panel-form {
+  .journey-layout {
+    grid-template-columns: minmax(16rem, 19rem) minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .progress-rail {
     position: sticky;
     top: 1rem;
+  }
+
+  .field-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

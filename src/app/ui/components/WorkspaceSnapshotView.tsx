@@ -2,7 +2,7 @@ import type { WorkspaceSnapshot } from "../../../domain/primitives/Workspace.js"
 import type { AgentSnapshot } from "../../../domain/primitives/Agent.js";
 
 export interface WorkspaceSnapshotViewProps {
-  agent: AgentSnapshot;
+  agent?: AgentSnapshot;
   workspace: WorkspaceSnapshot;
 }
 
@@ -16,7 +16,7 @@ export function WorkspaceSnapshotView(props: WorkspaceSnapshotViewProps) {
       <p>
         Learner: {workspace.learner.name} · {workspace.learner.yearGroup}
       </p>
-      <p>Agent: {agent.role}</p>
+      <p>Support role: {agent?.role ?? "Learning guide"}</p>
       <p>
         Workspace attachments: {workspace.taskIds.length} tasks · {workspace.workPlanIds.length} work
         plan · {workspace.artifactIds.length} artifact
@@ -24,4 +24,3 @@ export function WorkspaceSnapshotView(props: WorkspaceSnapshotViewProps) {
     </div>
   );
 }
-

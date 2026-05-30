@@ -8,6 +8,7 @@ import { SqliteLearningLoopRepository } from "../src/modules/planning/SqliteLear
 import { PracticeActivityController } from "../src/modules/practice/PracticeActivityController.js";
 import { FixtureAgentRuntime } from "../src/modules/runtime/FixtureAgentRuntime.js";
 import { RelayAgentRuntime } from "../src/modules/runtime/RelayAgentRuntime.js";
+import { deriveGoldenPathStep } from "../src/app/ui/deriveGoldenPathStep.js";
 import { InitialAssessmentContext, PracticeActivityContext, StudyPlanningContext } from "../src/domain/primitives/Context.js";
 import { MasterDataItem, MasterDataSource } from "../src/domain/learning/MasterData.js";
 import { LearningLoop, KnowledgeGap } from "../src/domain/learning/LearningLoop.js";
@@ -218,6 +219,11 @@ async function runLoopFlow(server: Awaited<ReturnType<typeof createServer>>) {
   });
   expect(assessmentResponse.statusCode).toBe(201);
   const assessment = assessmentResponse.json();
+  const afterAssessmentResume = await server.inject({
+    method: "GET",
+    url: `/v1/learning-loops/${assessment.learningLoop.id}`
+  });
+  expect(afterAssessmentResume.statusCode).toBe(200);
 
   const attemptResponse = await server.inject({
     method: "POST",
@@ -231,6 +237,11 @@ async function runLoopFlow(server: Awaited<ReturnType<typeof createServer>>) {
     }
   });
   expect(attemptResponse.statusCode).toBe(201);
+  const afterAttemptResume = await server.inject({
+    method: "GET",
+    url: `/v1/learning-loops/${assessment.learningLoop.id}`
+  });
+  expect(afterAttemptResume.statusCode).toBe(200);
 
   const studyPlanResponse = await server.inject({
     method: "POST",
@@ -252,6 +263,11 @@ async function runLoopFlow(server: Awaited<ReturnType<typeof createServer>>) {
     }
   });
   expect(studyPlanResponse.statusCode).toBe(201);
+  const afterStudyPlanResume = await server.inject({
+    method: "GET",
+    url: `/v1/learning-loops/${assessment.learningLoop.id}`
+  });
+  expect(afterStudyPlanResume.statusCode).toBe(200);
 
   const practiceResponse = await server.inject({
     method: "POST",
@@ -262,6 +278,11 @@ async function runLoopFlow(server: Awaited<ReturnType<typeof createServer>>) {
     }
   });
   expect(practiceResponse.statusCode).toBe(201);
+  const afterPracticeResume = await server.inject({
+    method: "GET",
+    url: `/v1/learning-loops/${assessment.learningLoop.id}`
+  });
+  expect(afterPracticeResume.statusCode).toBe(200);
 
   const practiceListResponse = await server.inject({
     method: "GET",
@@ -283,14 +304,25 @@ async function runLoopFlow(server: Awaited<ReturnType<typeof createServer>>) {
     }
   });
   expect(practiceCompletionResponse.statusCode).toBe(201);
+  const afterCompletionResume = await server.inject({
+    method: "GET",
+    url: `/v1/learning-loops/${assessment.learningLoop.id}`
+  });
+  expect(afterCompletionResume.statusCode).toBe(200);
 
   return {
     assessment: assessmentResponse.json(),
+    afterAssessmentResume: afterAssessmentResume.json(),
     attempt: attemptResponse.json(),
+    afterAttemptResume: afterAttemptResume.json(),
     practice: practiceResponse.json(),
     practiceList: practiceListResponse.json(),
     completion: practiceCompletionResponse.json(),
+    afterPracticeResume: afterPracticeResume.json(),
+    afterCompletionResume: afterCompletionResume.json(),
     studyPlan: studyPlanResponse.json()
+    ,
+    afterStudyPlanResume: afterStudyPlanResume.json()
   };
 }
 
@@ -491,11 +523,26 @@ describe("Agent runtime contract", () => {
       const relay = await runLoopFlow(relayServer);
 
       expect(Object.keys(relay.assessment).sort()).toEqual(Object.keys(fixture.assessment).sort());
+      expect(Object.keys(relay.afterAssessmentResume).sort()).toEqual(
+        Object.keys(fixture.afterAssessmentResume).sort()
+      );
       expect(Object.keys(relay.attempt).sort()).toEqual(Object.keys(fixture.attempt).sort());
+      expect(Object.keys(relay.afterAttemptResume).sort()).toEqual(
+        Object.keys(fixture.afterAttemptResume).sort()
+      );
       expect(Object.keys(relay.practice).sort()).toEqual(Object.keys(fixture.practice).sort());
       expect(Object.keys(relay.practiceList).sort()).toEqual(Object.keys(fixture.practiceList).sort());
       expect(Object.keys(relay.completion).sort()).toEqual(Object.keys(fixture.completion).sort());
+      expect(Object.keys(relay.afterPracticeResume).sort()).toEqual(
+        Object.keys(fixture.afterPracticeResume).sort()
+      );
+      expect(Object.keys(relay.afterCompletionResume).sort()).toEqual(
+        Object.keys(fixture.afterCompletionResume).sort()
+      );
       expect(Object.keys(relay.studyPlan).sort()).toEqual(Object.keys(fixture.studyPlan).sort());
+      expect(Object.keys(relay.afterStudyPlanResume).sort()).toEqual(
+        Object.keys(fixture.afterStudyPlanResume).sort()
+      );
 
       expect(relay.assessment).toMatchObject({
         learningLoopId: expect.any(String),
@@ -540,6 +587,11 @@ describe("Agent runtime contract", () => {
           kind: expect.any(String)
         })
       });
+      expect(deriveGoldenPathStep(relay.afterAssessmentResume)).toBe("take-assessment");
+      expect(deriveGoldenPathStep(relay.afterAttemptResume)).toBe("plan-study");
+      expect(deriveGoldenPathStep(relay.afterStudyPlanResume)).toBe("generate-practice");
+      expect(deriveGoldenPathStep(relay.afterPracticeResume)).toBe("complete-review");
+      expect(deriveGoldenPathStep(relay.afterCompletionResume)).toBe("track-progress");
     } finally {
       await fixtureServer.close();
       await relayServer.close();

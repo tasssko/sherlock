@@ -2,6 +2,7 @@ import type {
   AssessmentAttemptResponse,
   InitialAssessmentResponse
 } from "../../../domain/study/AssessmentGeneration.js";
+import type { LearningLoopResumeResponse } from "../../../domain/study/LearningLoops.js";
 import type {
   MasterDataUploadResponse,
   UploadMasterDataCommand
@@ -108,6 +109,15 @@ export async function generatePracticeActivity(
       })
     }
   );
+}
+
+export async function getLearningLoop(
+  apiBaseUrl: string,
+  learningLoopId: string
+): Promise<LearningLoopResumeResponse> {
+  return requestJson<LearningLoopResumeResponse>(`${apiBaseUrl}/v1/learning-loops/${learningLoopId}`, {
+    method: "GET"
+  });
 }
 
 export async function completePracticeActivity(

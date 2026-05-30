@@ -16,7 +16,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "dev:api": "tsx src/app/api/server.ts",
-    "dev:frontend": "vite",
+    "dev:frontend": "vite --host 127.0.0.1 --port 4174",
     "start:api": "node dist/app/api/server.js"
   },
   "dependencies": {

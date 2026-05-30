@@ -6,6 +6,7 @@ export interface MasterDataPasteValues {
 }
 
 export interface MasterDataPasteFormProps {
+  helperText?: string;
   disabled: boolean;
   error: string | null;
   status: string | null;
@@ -15,14 +16,14 @@ export interface MasterDataPasteFormProps {
 }
 
 export function MasterDataPasteForm(props: MasterDataPasteFormProps) {
-  const { disabled, error, onSubmit, onValuesChange, status, values } = props;
+  const { disabled, error, helperText, onSubmit, onValuesChange, status, values } = props;
 
   return (
     <section className="panel panel-form">
       <h2>2. Master Data</h2>
       <form onSubmit={onSubmit}>
         <label>
-          Source name
+          Study material pack name
           <input
             value={values.sourceName}
             onChange={(event) =>
@@ -35,7 +36,7 @@ export function MasterDataPasteForm(props: MasterDataPasteFormProps) {
         </label>
 
         <label>
-          Paste study material
+          Paste study material lines
           <textarea
             rows={8}
             value={values.lines}
@@ -51,9 +52,10 @@ export function MasterDataPasteForm(props: MasterDataPasteFormProps) {
         <p className="hint">
           One line per item: <code>prompt || canonical answer || visible material || optional keywords</code>
         </p>
+        {helperText ? <p className="hint">{helperText}</p> : null}
 
         <button type="submit" disabled={disabled}>
-          {disabled ? "Uploading..." : "Upload master data"}
+          {disabled ? "Saving study material..." : "Save study material"}
         </button>
       </form>
 
