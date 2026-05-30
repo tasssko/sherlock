@@ -1,11 +1,10 @@
 import { Artifact, ArtifactProvenance } from "../../domain/primitives/Artifact.js";
 import { StudyPlanningContext } from "../../domain/primitives/Context.js";
 import { createDomainEventRecorder } from "../../domain/primitives/Event.js";
-import { Workspace } from "../../domain/primitives/Workspace.js";
-import type { Result } from "../../domain/primitives/result.js";
+import { err, type Result } from "../../domain/primitives/result.js";
 import type { CreateStudyPlanCommand } from "../../domain/study/StudyPlanning.js";
 import { LearningLoopSelector } from "../learning/LearningLoopSelector.js";
-import type { StudyWorkspaceRecord } from "./StudyPlanRepository.js";
+import type { LearningLoopRecord } from "./LearningLoopRepository.js";
 import type { StudyPlanAggregate } from "./StudyPlanProjector.js";
 import { StudyPlanAdaptation } from "./StudyPlanAdaptation.js";
 import { StudyPlanTaskAssembler } from "./StudyPlanTaskAssembler.js";
@@ -13,12 +12,12 @@ import { StudyPlanWorkPlanBuilder } from "./StudyPlanWorkPlanBuilder.js";
 import { createStudyPlannerAgent, generateStudyPlan } from "./StudyPlannerAgent.js";
 import { WorkspaceStudyPlanAssembler } from "./WorkspaceStudyPlanAssembler.js";
 
-export interface StudyPlanWorkflowInput {
+export interface GenerateStudyPlanInput {
   command: CreateStudyPlanCommand;
-  existingRecord?: StudyWorkspaceRecord;
+  existingRecord?: LearningLoopRecord;
 }
 
-export class StudyPlanWorkflow {
+export class StudyPlanGenerationService {
   constructor(
     private readonly loopSelector = new LearningLoopSelector(),
     private readonly adaptation = new StudyPlanAdaptation(),
@@ -27,35 +26,36 @@ export class StudyPlanWorkflow {
     private readonly aggregateAssembler = new WorkspaceStudyPlanAssembler()
   ) {}
 
-  run(input: StudyPlanWorkflowInput): Result<StudyPlanAggregate> {
-    let workspace =
-      input.existingRecord?.workspace ??
-      Workspace.create({
-        title: input.command.workspaceLabel ?? `${input.command.learnerName} Study Workspace`,
-        learner: {
-          name: input.command.learnerName,
-          yearGroup: input.command.yearGroup,
-          availableMinutesByDay: input.command.availableMinutesByDay
-        },
-        activeObjective: input.command.objective
+  run(input: GenerateStudyPlanInput): Result<StudyPlanAggregate> {
+    const workspace = input.existingRecord?.workspace;
+    if (!workspace) {
+      return err({
+        code: "NOT_FOUND",
+        message: "A learning loop must exist before generating a study plan."
       });
+    }
 
     const events = createDomainEventRecorder(workspace.id);
     const topic = input.command.focusTopics[0] ?? "study";
-    const learningLoop = this.loopSelector.findOrCreate({
-      objective: input.command.objective,
-      record: input.existingRecord,
-      topic,
-      workspace,
-      events
-    });
+    const learningLoop = this.loopSelector.findByTopic(input.existingRecord, topic);
+    if (!learningLoop) {
+      return err({
+        code: "NOT_FOUND",
+        message: `No diagnosed learning loop was found for topic ${topic}.`
+      });
+    }
     const loopKnowledgeGaps =
       input.existingRecord?.knowledgeGaps.filter((gap) => learningLoop.knowledgeGapIds.includes(gap.id)) ??
       [];
     const masteryProfile = input.existingRecord?.masteryProfiles.find(
       (candidate) => candidate.id === learningLoop.toSnapshot().masteryProfileId
     );
+    const activeReviewSessions =
+      input.existingRecord?.activeReviewSessions.filter(
+        (candidate) => candidate.toSnapshot().learningLoopId === learningLoop.id
+      ) ?? [];
     const adaptedPlan = this.adaptation.adapt({
+      activeReviewSessions,
       command: input.command,
       learningLoop,
       knowledgeGaps: loopKnowledgeGaps,

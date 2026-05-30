@@ -7,6 +7,10 @@ export const capabilityCatalog = {
     id: "attempt.evaluate",
     description: "Evaluate submitted assessment answers and identify knowledge gaps."
   },
+  generatePracticeActivity: {
+    id: "practice-activity.generate",
+    description: "Generate a targeted practice activity from diagnosed gaps and master data."
+  },
   createChildTask: {
     id: "task.create-child",
     description: "Create child tasks under a parent task."

@@ -61,6 +61,10 @@ export class MasterDataItem {
     return this.snapshot.visibleMaterial;
   }
 
+  get keywords(): readonly string[] {
+    return this.snapshot.keywords;
+  }
+
   toSnapshot(): MasterDataItemSnapshot {
     return {
       ...this.snapshot,

@@ -1,5 +1,5 @@
 import { Attempt, Evaluation } from "../../domain/learning/Assessment.js";
-import { KnowledgeGap, MasteryProfile } from "../../domain/learning/LearningLoop.js";
+import { KnowledgeGap } from "../../domain/learning/LearningLoop.js";
 import type { DomainEventRecorder } from "../../domain/primitives/Event.js";
 import { err, ok, type Result } from "../../domain/primitives/result.js";
 import type { SubmitAssessmentAttemptCommand } from "../../domain/study/AssessmentGeneration.js";
@@ -18,7 +18,6 @@ export interface AssessmentAttemptEvaluation {
   attempt: Attempt;
   evaluation: Evaluation;
   knowledgeGaps: readonly KnowledgeGap[];
-  masteryProfile: MasteryProfile;
   learningLoop: LearningLoop;
 }
 
@@ -27,7 +26,6 @@ export class AssessmentAttemptEvaluator {
     assessment: Assessment;
     command: SubmitAssessmentAttemptCommand;
     events: DomainEventRecorder;
-    existingMasteryProfile?: MasteryProfile;
     learningLoop: LearningLoop;
   }): Result<AssessmentAttemptEvaluation> {
     const assessmentSnapshot = input.assessment.toSnapshot();
@@ -72,8 +70,21 @@ export class AssessmentAttemptEvaluator {
       input.events
     );
 
-    let learningLoop = input.learningLoop.recordAttempt(attempt.id, input.events);
-    learningLoop = learningLoop.recordEvaluation(evaluation.id, input.events);
+    let learningLoop = input.learningLoop.recordAssessmentAttemptSubmitted(
+      {
+        assessmentId: input.assessment.id,
+        attemptId: attempt.id
+      },
+      input.events
+    );
+    learningLoop = learningLoop.recordAssessmentEvaluated(
+      {
+        assessmentId: input.assessment.id,
+        evaluationId: evaluation.id,
+        score
+      },
+      input.events
+    );
 
     const knowledgeGaps = itemResults
       .filter((result) => !result.correct)
@@ -87,19 +98,15 @@ export class AssessmentAttemptEvaluator {
         })
       );
 
-    for (const gap of knowledgeGaps) {
-      learningLoop = learningLoop.recordKnowledgeGap(gap.id, input.events);
-    }
-
-    let masteryProfile = input.existingMasteryProfile ?? MasteryProfile.create(input.learningLoop.id);
-    masteryProfile = masteryProfile.recordTopicScore(input.assessment.topic, score);
-    learningLoop = learningLoop.attachMasteryProfile(masteryProfile.id, input.events);
+    learningLoop = learningLoop.identifyKnowledgeGaps(
+      knowledgeGaps.map((gap) => gap.id),
+      input.events
+    );
 
     return ok({
       attempt,
       evaluation,
       knowledgeGaps,
-      masteryProfile,
       learningLoop
     });
   }

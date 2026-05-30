@@ -1,11 +1,13 @@
 import type {
   InitialAssessmentContext,
+  PracticeActivityContext,
   StudyPlanningContext
 } from "./Context.js";
 import type { DomainEventRecorder } from "./Event.js";
 import { err, ok, type Result } from "./result.js";
 import type { StudyPlanArtifactContent } from "../study/StudyPlanning.js";
 import type { AssessmentArtifactContent } from "../study/AssessmentGeneration.js";
+import type { FlashcardSet } from "../learning/PracticeActivity.js";
 
 export type PolicyId =
   | "age-appropriate-content"
@@ -13,9 +15,9 @@ export type PolicyId =
   | "no-direct-answer";
 
 export interface PolicyEvaluationInput {
-  context: InitialAssessmentContext | StudyPlanningContext;
-  artifactContent: AssessmentArtifactContent | StudyPlanArtifactContent;
-  kind: "assessment" | "study-plan";
+  context: InitialAssessmentContext | PracticeActivityContext | StudyPlanningContext;
+  artifactContent: AssessmentArtifactContent | FlashcardSet | StudyPlanArtifactContent;
+  kind: "assessment" | "practice-activity" | "study-plan";
 }
 
 export interface Policy {
@@ -47,7 +49,8 @@ export const policyCatalog: Record<PolicyId, Policy> = {
     "age-appropriate-content",
     "Outputs must be appropriate for the learner year group.",
     ({ context, artifactContent }) => {
-      if (!context.yearGroup.startsWith("Year ")) {
+      const yearGroup = context.yearGroup;
+      if (!yearGroup.startsWith("Year ")) {
         return err({
           code: "POLICY_VIOLATION",
           message: "Study plans require an explicit school year group."
@@ -68,6 +71,13 @@ export const policyCatalog: Record<PolicyId, Policy> = {
         return err({
           code: "POLICY_VIOLATION",
           message: "Assessment item count exceeds the age-appropriate limit."
+        });
+      }
+
+      if ("cards" in artifactContent && artifactContent.cards.length > 12) {
+        return err({
+          code: "POLICY_VIOLATION",
+          message: "Practice activity card count exceeds the age-appropriate limit."
         });
       }
 
@@ -104,6 +114,7 @@ export const policyCatalog: Record<PolicyId, Policy> = {
       }
 
       if (kind === "assessment" && "topic" in context && "items" in artifactContent) {
+        const assessmentContext = context as InitialAssessmentContext;
         if (artifactContent.topic !== context.topic) {
           return err({
             code: "POLICY_VIOLATION",
@@ -111,10 +122,30 @@ export const policyCatalog: Record<PolicyId, Policy> = {
           });
         }
 
-        if (artifactContent.items.length !== context.questionCount) {
+        if (artifactContent.items.length !== assessmentContext.questionCount) {
           return err({
             code: "POLICY_VIOLATION",
             message: "Assessment item count does not match the requested question count."
+          });
+        }
+      }
+
+      if (kind === "practice-activity" && "topic" in context && "cards" in artifactContent) {
+        const practiceContext = context as PracticeActivityContext;
+        if (artifactContent.cards.length !== practiceContext.cardCount) {
+          return err({
+            code: "POLICY_VIOLATION",
+            message: "Practice activity card count does not match the request."
+          });
+        }
+
+        const misalignedCard = artifactContent.cards.find(
+          (card) => card.topic !== practiceContext.topic
+        );
+        if (misalignedCard) {
+          return err({
+            code: "POLICY_VIOLATION",
+            message: `Practice card ${misalignedCard.id} is outside the diagnosed topic ${practiceContext.topic}.`
           });
         }
       }
@@ -129,6 +160,9 @@ export const policyCatalog: Record<PolicyId, Policy> = {
       const allText = [
         ...("summary" in artifactContent ? [artifactContent.summary] : [artifactContent.instructions]),
         ...("items" in artifactContent ? artifactContent.items.map((item) => item.prompt) : []),
+        ...("cards" in artifactContent
+          ? artifactContent.cards.flatMap((card) => [card.front, card.back])
+          : []),
         ...("checkpoints" in artifactContent ? artifactContent.checkpoints : []),
         ...("notes" in artifactContent ? artifactContent.notes : []),
         ...("sessions" in artifactContent

@@ -8,9 +8,9 @@ import { Workspace } from "../../domain/primitives/Workspace.js";
 import { ok } from "../../domain/primitives/result.js";
 import type { AssessmentArtifactContent } from "../../domain/study/AssessmentGeneration.js";
 import {
-  createStudyWorkspaceRecord,
-  type StudyWorkspaceRecord
-} from "../planning/StudyPlanRepository.js";
+  createLearningLoopRecord,
+  type LearningLoopRecord
+} from "../planning/LearningLoopRepository.js";
 import type { InitialAssessmentAggregate } from "./AssessmentProjector.js";
 
 export class WorkspaceAssessmentAssembler {
@@ -20,12 +20,17 @@ export class WorkspaceAssessmentAssembler {
     assessment: Assessment;
     events: DomainEventRecorder;
     learningLoop: LearningLoop;
-    record?: StudyWorkspaceRecord;
+    record?: LearningLoopRecord;
     task: Task;
     workspace: Workspace;
   }) {
-    let learningLoop = input.learningLoop.attachAssessment(input.assessment.id, input.events);
-    learningLoop = learningLoop.attachArtifact(input.artifact.id, input.events);
+    const learningLoop = input.learningLoop.recordInitialAssessmentGenerated(
+      {
+        assessmentId: input.assessment.id,
+        artifactId: input.artifact.id
+      },
+      input.events
+    );
 
     let workspace = input.workspace.attachTask(input.task.id, input.events);
     workspace = workspace.attachArtifact(input.artifact.id, input.events);
@@ -49,7 +54,7 @@ export class WorkspaceAssessmentAssembler {
     ];
 
     return ok({
-      record: createStudyWorkspaceRecord({
+      record: createLearningLoopRecord({
         workspace,
         tasks,
         workPlans,
@@ -60,7 +65,9 @@ export class WorkspaceAssessmentAssembler {
         attempts: [...(existingRecord?.attempts ?? [])],
         evaluations: [...(existingRecord?.evaluations ?? [])],
         knowledgeGaps: [...(existingRecord?.knowledgeGaps ?? [])],
-        masteryProfiles: [...(existingRecord?.masteryProfiles ?? [])]
+        masteryProfiles: [...(existingRecord?.masteryProfiles ?? [])],
+        practiceActivities: [...(existingRecord?.practiceActivities ?? [])],
+        activeReviewSessions: [...(existingRecord?.activeReviewSessions ?? [])]
       }),
       aggregate: {
         workspace,

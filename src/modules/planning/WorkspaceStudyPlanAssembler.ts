@@ -36,8 +36,14 @@ export class WorkspaceStudyPlanAssembler {
     }
 
     let workspace = input.workspace;
-    let learningLoop = input.learningLoop.attachWorkPlan(input.workPlan.id, input.events);
-    learningLoop = learningLoop.attachArtifact(input.artifact.id, input.events);
+    const learningLoop = input.learningLoop.recordStudyPlanAdapted(
+      {
+        workPlanId: input.workPlan.id,
+        artifactId: input.artifact.id,
+        diagnosedGapCount: input.knowledgeGaps.length
+      },
+      input.events
+    );
     for (const task of tasks) {
       workspace = workspace.attachTask(task.id, input.events);
     }

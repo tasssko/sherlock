@@ -2,27 +2,26 @@ import type { Controller } from "../../domain/primitives/Controller.js";
 import { ok, type Result } from "../../domain/primitives/result.js";
 import type { CreateStudyPlanCommand, StudyPlanResponse } from "../../domain/study/StudyPlanning.js";
 import {
-  createStudyWorkspaceRecord,
-  SqliteStudyPlanRepository,
-  type StudyPlanRepository
-} from "./StudyPlanRepository.js";
-import { StudyPlanRepositoryKey } from "./StudyPlanRepositoryKey.js";
+  createLearningLoopRecord,
+  type LearningLoopRepository
+} from "./LearningLoopRepository.js";
+import { LearnerWorkspaceKey } from "./LearnerWorkspaceKey.js";
 import { StudyPlanProjector } from "./StudyPlanProjector.js";
-import { StudyPlanWorkflow } from "./StudyPlanWorkflow.js";
+import { StudyPlanGenerationService } from "./StudyPlanGenerationService.js";
 
 export class StudyPlanController
   implements Controller<CreateStudyPlanCommand, StudyPlanResponse>
 {
   constructor(
-    private readonly repository: StudyPlanRepository = new SqliteStudyPlanRepository(),
-    private readonly workflow = new StudyPlanWorkflow(),
+    private readonly repository: LearningLoopRepository,
+    private readonly service = new StudyPlanGenerationService(),
     private readonly projector = new StudyPlanProjector()
   ) {}
 
   execute(command: CreateStudyPlanCommand): Result<StudyPlanResponse> {
-    const repositoryKey = StudyPlanRepositoryKey.fromCommand(command);
+    const repositoryKey = LearnerWorkspaceKey.fromCommand(command);
     const existingRecord = this.repository.findRecord(repositoryKey);
-    const aggregate = this.workflow.run({
+    const aggregate = this.service.run({
       command,
       existingRecord
     });
@@ -33,7 +32,7 @@ export class StudyPlanController
 
     this.repository.saveRecord(
       repositoryKey,
-      createStudyWorkspaceRecord({
+      createLearningLoopRecord({
         workspace: aggregate.value.workspace,
         tasks: [...(existingRecord?.tasks ?? []), ...aggregate.value.tasks],
         workPlans: [
@@ -62,6 +61,9 @@ export class StudyPlanController
               aggregate.value.masteryProfile
             ]
           : [...(existingRecord?.masteryProfiles ?? [])]
+        ,
+        practiceActivities: [...(existingRecord?.practiceActivities ?? [])],
+        activeReviewSessions: [...(existingRecord?.activeReviewSessions ?? [])]
       })
     );
 

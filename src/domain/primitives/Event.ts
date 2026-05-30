@@ -1,4 +1,5 @@
 import type {
+  ActiveReviewSessionId,
   AgentId,
   ArtifactId,
   AssessmentId,
@@ -7,8 +8,10 @@ import type {
   EvaluationId,
   KnowledgeGapId,
   LearningLoopId,
+  MasterDataItemId,
   MasterDataSourceId,
   MasteryProfileId,
+  PracticeActivityId,
   TaskId,
   WorkPlanId,
   WorkspaceId
@@ -16,6 +19,7 @@ import type {
 import { createEventId } from "./ids.js";
 import type { PolicyId } from "./Policy.js";
 import type { TaskState } from "./Task.js";
+import type { PracticeActivityKind } from "../learning/PracticeActivity.js";
 
 interface BaseEvent<TType extends string, TPayload> {
   id: EventId;
@@ -90,34 +94,60 @@ export type LearningLoopCreatedEvent = BaseEvent<
   { learningLoopId: LearningLoopId; phase: string; topic: string }
 >;
 
-export type LearningLoopAssessmentAttachedEvent = BaseEvent<
-  "learning-loop.assessment-attached",
-  { learningLoopId: LearningLoopId; assessmentId: AssessmentId }
+export type InitialAssessmentGeneratedEvent = BaseEvent<
+  "initial-assessment.generated",
+  { learningLoopId: LearningLoopId; assessmentId: AssessmentId; artifactId: ArtifactId }
 >;
 
-export type LearningLoopAttemptRecordedEvent = BaseEvent<
-  "learning-loop.attempt-recorded",
-  { learningLoopId: LearningLoopId; attemptId: AttemptId }
+export type AssessmentAttemptSubmittedEvent = BaseEvent<
+  "assessment-attempt.submitted",
+  { learningLoopId: LearningLoopId; assessmentId: AssessmentId; attemptId: AttemptId }
 >;
 
-export type LearningLoopEvaluationRecordedEvent = BaseEvent<
-  "learning-loop.evaluation-recorded",
-  { learningLoopId: LearningLoopId; evaluationId: EvaluationId }
+export type AssessmentEvaluatedEvent = BaseEvent<
+  "assessment.evaluated",
+  {
+    learningLoopId: LearningLoopId;
+    assessmentId: AssessmentId;
+    evaluationId: EvaluationId;
+    score: number;
+  }
 >;
 
-export type LearningLoopKnowledgeGapRecordedEvent = BaseEvent<
-  "learning-loop.knowledge-gap-recorded",
-  { learningLoopId: LearningLoopId; knowledgeGapId: KnowledgeGapId }
+export type KnowledgeGapsIdentifiedEvent = BaseEvent<
+  "knowledge-gaps.identified",
+  { learningLoopId: LearningLoopId; knowledgeGapIds: readonly KnowledgeGapId[] }
 >;
 
-export type LearningLoopWorkPlanAttachedEvent = BaseEvent<
-  "learning-loop.work-plan-attached",
-  { learningLoopId: LearningLoopId; workPlanId: WorkPlanId }
+export type StudyPlanAdaptedEvent = BaseEvent<
+  "study-plan.adapted",
+  {
+    learningLoopId: LearningLoopId;
+    workPlanId: WorkPlanId;
+    artifactId: ArtifactId;
+    diagnosedGapCount: number;
+  }
 >;
 
-export type LearningLoopArtifactAttachedEvent = BaseEvent<
-  "learning-loop.artifact-attached",
-  { learningLoopId: LearningLoopId; artifactId: ArtifactId }
+export type PracticeActivityGeneratedEvent = BaseEvent<
+  "practice-activity.generated",
+  {
+    learningLoopId: LearningLoopId;
+    practiceActivityId: PracticeActivityId;
+    kind: PracticeActivityKind;
+    targetKnowledgeGapIds: readonly KnowledgeGapId[];
+    sourceMasterDataItemIds: readonly MasterDataItemId[];
+  }
+>;
+
+export type PracticeActivityCompletedEvent = BaseEvent<
+  "practice-activity.completed",
+  {
+    activeReviewSessionId: ActiveReviewSessionId;
+    learningLoopId: LearningLoopId;
+    practiceActivityId: PracticeActivityId;
+    masteryScore: number;
+  }
 >;
 
 export type LearningLoopMasteryProfileUpdatedEvent = BaseEvent<
@@ -155,19 +185,20 @@ export type DomainEvent =
   | ArtifactGeneratedEvent
   | ArtifactRevisedEvent
   | AssessmentArtifactAttachedEvent
+  | AssessmentAttemptSubmittedEvent
+  | AssessmentEvaluatedEvent
   | AssessmentCreatedEvent
   | AttemptCreatedEvent
   | EvaluationCreatedEvent
-  | LearningLoopArtifactAttachedEvent
-  | LearningLoopAssessmentAttachedEvent
-  | LearningLoopAttemptRecordedEvent
+  | InitialAssessmentGeneratedEvent
+  | KnowledgeGapsIdentifiedEvent
   | LearningLoopCreatedEvent
-  | LearningLoopEvaluationRecordedEvent
-  | LearningLoopKnowledgeGapRecordedEvent
   | LearningLoopMasteryProfileUpdatedEvent
-  | LearningLoopWorkPlanAttachedEvent
   | MasterDataSourceRegisteredEvent
   | PolicyEvaluatedEvent
+  | PracticeActivityCompletedEvent
+  | PracticeActivityGeneratedEvent
+  | StudyPlanAdaptedEvent
   | TaskCreatedEvent
   | TaskStateChangedEvent
   | WorkPlanArtifactAttachedEvent
@@ -323,74 +354,108 @@ export class DomainEventRecorder {
     );
   }
 
-  recordLearningLoopAssessmentAttached(
+  recordInitialAssessmentGenerated(
     learningLoopId: LearningLoopId,
-    assessmentId: AssessmentId
+    assessmentId: AssessmentId,
+    artifactId: ArtifactId
   ): void {
     this.items.push(
-      makeEvent(this.workspaceId, "learning-loop.assessment-attached", {
+      makeEvent(this.workspaceId, "initial-assessment.generated", {
         learningLoopId,
-        assessmentId
+        assessmentId,
+        artifactId
       })
     );
   }
 
-  recordLearningLoopAttemptRecorded(
+  recordAssessmentAttemptSubmitted(
     learningLoopId: LearningLoopId,
+    assessmentId: AssessmentId,
     attemptId: AttemptId
   ): void {
     this.items.push(
-      makeEvent(this.workspaceId, "learning-loop.attempt-recorded", {
+      makeEvent(this.workspaceId, "assessment-attempt.submitted", {
         learningLoopId,
+        assessmentId,
         attemptId
       })
     );
   }
 
-  recordLearningLoopEvaluationRecorded(
+  recordAssessmentEvaluated(
     learningLoopId: LearningLoopId,
-    evaluationId: EvaluationId
+    assessmentId: AssessmentId,
+    evaluationId: EvaluationId,
+    score: number
   ): void {
     this.items.push(
-      makeEvent(this.workspaceId, "learning-loop.evaluation-recorded", {
+      makeEvent(this.workspaceId, "assessment.evaluated", {
         learningLoopId,
-        evaluationId
+        assessmentId,
+        evaluationId,
+        score
       })
     );
   }
 
-  recordLearningLoopKnowledgeGapRecorded(
+  recordKnowledgeGapsIdentified(
     learningLoopId: LearningLoopId,
-    knowledgeGapId: KnowledgeGapId
+    knowledgeGapIds: readonly KnowledgeGapId[]
   ): void {
     this.items.push(
-      makeEvent(this.workspaceId, "learning-loop.knowledge-gap-recorded", {
+      makeEvent(this.workspaceId, "knowledge-gaps.identified", {
         learningLoopId,
-        knowledgeGapId
+        knowledgeGapIds: [...knowledgeGapIds]
       })
     );
   }
 
-  recordLearningLoopWorkPlanAttached(
+  recordStudyPlanAdapted(
     learningLoopId: LearningLoopId,
-    workPlanId: WorkPlanId
+    workPlanId: WorkPlanId,
+    artifactId: ArtifactId,
+    diagnosedGapCount: number
   ): void {
     this.items.push(
-      makeEvent(this.workspaceId, "learning-loop.work-plan-attached", {
+      makeEvent(this.workspaceId, "study-plan.adapted", {
         learningLoopId,
-        workPlanId
+        workPlanId,
+        artifactId,
+        diagnosedGapCount
       })
     );
   }
 
-  recordLearningLoopArtifactAttached(
+  recordPracticeActivityGenerated(
     learningLoopId: LearningLoopId,
-    artifactId: ArtifactId
+    practiceActivityId: PracticeActivityId,
+    kind: PracticeActivityKind,
+    targetKnowledgeGapIds: readonly KnowledgeGapId[],
+    sourceMasterDataItemIds: readonly MasterDataItemId[]
   ): void {
     this.items.push(
-      makeEvent(this.workspaceId, "learning-loop.artifact-attached", {
+      makeEvent(this.workspaceId, "practice-activity.generated", {
         learningLoopId,
-        artifactId
+        practiceActivityId,
+        kind,
+        targetKnowledgeGapIds: [...targetKnowledgeGapIds],
+        sourceMasterDataItemIds: [...sourceMasterDataItemIds]
+      })
+    );
+  }
+
+  recordPracticeActivityCompleted(
+    learningLoopId: LearningLoopId,
+    practiceActivityId: PracticeActivityId,
+    activeReviewSessionId: ActiveReviewSessionId,
+    masteryScore: number
+  ): void {
+    this.items.push(
+      makeEvent(this.workspaceId, "practice-activity.completed", {
+        activeReviewSessionId,
+        learningLoopId,
+        practiceActivityId,
+        masteryScore
       })
     );
   }

@@ -25,8 +25,8 @@ const submitAttemptSchema = z.object({
 
 export async function registerAssessmentRoutes(
   server: FastifyInstance,
-  initialAssessmentController = new InitialAssessmentController(),
-  assessmentAttemptController = new AssessmentAttemptController()
+  initialAssessmentController: InitialAssessmentController,
+  assessmentAttemptController: AssessmentAttemptController
 ): Promise<void> {
   server.post("/v1/assessments/initial", async (request, reply) => {
     const parsed = createInitialAssessmentSchema.safeParse(request.body);

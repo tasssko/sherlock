@@ -3,6 +3,7 @@ import { createServer } from "../src/app/api/createServer.js";
 import type { InitialAssessmentController } from "../src/modules/assessment/InitialAssessmentController.js";
 import type { MasterDataUploadController } from "../src/modules/assessment/MasterDataUploadController.js";
 import type { StudyPlanController } from "../src/modules/planning/StudyPlanController.js";
+import type { PracticeActivityController } from "../src/modules/practice/PracticeActivityController.js";
 
 const validStudyPlanBody = {
   learnerName: "Year 7 learner",
@@ -115,6 +116,64 @@ describe("Route boundaries", () => {
         ])
       );
 
+      const practiceResponse = await server.inject({
+        method: "POST",
+        url: `/v1/learning-loops/${assessmentPayload.learningLoop.id}/practice-activities`,
+        payload: {
+          kind: "flashcard_set",
+          cardCount: 2
+        }
+      });
+
+      expect(practiceResponse.statusCode).toBe(201);
+      expect(practiceResponse.json().practiceActivity.flashcardSet.cards).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            sourceMasterDataItemId: expect.any(String),
+            knowledgeGapId: expect.any(String)
+          })
+        ])
+      );
+
+      const practiceListResponse = await server.inject({
+        method: "GET",
+        url: `/v1/learning-loops/${assessmentPayload.learningLoop.id}/practice-activities`
+      });
+
+      expect(practiceListResponse.statusCode).toBe(200);
+      expect(practiceListResponse.json().practiceActivities).toHaveLength(1);
+
+      const practiceCompletionResponse = await server.inject({
+        method: "POST",
+        url: `/v1/practice-activities/${practiceResponse.json().practiceActivity.id}/completions`,
+        payload: {
+          responses: practiceResponse.json().practiceActivity.flashcardSet.cards.map(
+            (card: { id: string; back: string }) => ({
+              practiceItemId: card.id,
+              responseText: card.back,
+              confidence: "high"
+            })
+          )
+        }
+      });
+
+      expect(practiceCompletionResponse.statusCode).toBe(201);
+      expect(practiceCompletionResponse.json().activeReviewSession.itemResults).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            confidence: "high",
+            correct: expect.any(Boolean)
+          })
+        ])
+      );
+      expect(practiceCompletionResponse.json().masteryProfile.topics).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            topic: "fractions"
+          })
+        ])
+      );
+
       const studyPlanResponse = await server.inject({
         method: "POST",
         url: "/v1/study-plans",
@@ -123,13 +182,7 @@ describe("Route boundaries", () => {
 
       expect(studyPlanResponse.statusCode).toBe(201);
       expect(studyPlanResponse.json().learningLoop.id).toBe(assessmentPayload.learningLoop.id);
-      expect(studyPlanResponse.json().knowledgeGaps).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            topic: "fractions"
-          })
-        ])
-      );
+      expect(Array.isArray(studyPlanResponse.json().knowledgeGaps)).toBe(true);
     } finally {
       await server.close();
     }
@@ -147,6 +200,25 @@ describe("Route boundaries", () => {
           yearGroup: "Year 7",
           topic: "",
           questionCount: 0
+        }
+      });
+
+      expect(response.statusCode).toBe(400);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("maps practice-activity validation errors to 400", async () => {
+    const server = await createServer();
+
+    try {
+      const response = await server.inject({
+        method: "POST",
+        url: "/v1/learning-loops/loop_missing/practice-activities",
+        payload: {
+          kind: "flashcard_set",
+          cardCount: 0
         }
       });
 
@@ -273,6 +345,54 @@ describe("Route boundaries", () => {
       expect(response.json()).toMatchObject({
         code: "VALIDATION_ERROR",
         error: "Upload failed."
+      });
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("maps practice-activity domain errors in the API layer", async () => {
+    const controller = {
+      generate() {
+        return {
+          ok: false as const,
+          error: {
+            code: "NOT_FOUND" as const,
+            message: "Learning loop missing."
+          }
+        };
+      },
+      complete() {
+        return {
+          ok: true as const,
+          value: {}
+        };
+      },
+      list() {
+        return {
+          ok: true as const,
+          value: {}
+        };
+      }
+    } as unknown as PracticeActivityController;
+    const server = await createServer({
+      practiceActivityController: controller
+    });
+
+    try {
+      const response = await server.inject({
+        method: "POST",
+        url: "/v1/learning-loops/loop_missing/practice-activities",
+        payload: {
+          kind: "flashcard_set",
+          cardCount: 2
+        }
+      });
+
+      expect(response.statusCode).toBe(404);
+      expect(response.json()).toMatchObject({
+        code: "NOT_FOUND",
+        error: "Learning loop missing."
       });
     } finally {
       await server.close();

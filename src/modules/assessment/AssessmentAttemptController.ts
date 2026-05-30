@@ -6,17 +6,16 @@ import type {
 } from "../../domain/study/AssessmentGeneration.js";
 import { createDomainEventRecorder } from "../../domain/primitives/Event.js";
 import {
-  createStudyWorkspaceRecord,
-  SqliteStudyPlanRepository,
-  type StudyPlanRepository
-} from "../planning/StudyPlanRepository.js";
+  createLearningLoopRecord,
+  type LearningLoopRepository
+} from "../planning/LearningLoopRepository.js";
 import { AssessmentAttemptEvaluator } from "./AssessmentAttemptEvaluator.js";
 
 export class AssessmentAttemptController
   implements Controller<SubmitAssessmentAttemptCommand, AssessmentAttemptResponse>
 {
   constructor(
-    private readonly repository: StudyPlanRepository = new SqliteStudyPlanRepository(),
+    private readonly repository: LearningLoopRepository,
     private readonly evaluator = new AssessmentAttemptEvaluator()
   ) {}
 
@@ -49,15 +48,11 @@ export class AssessmentAttemptController
       });
     }
 
-    const existingMasteryProfile = located.record.masteryProfiles.find(
-      (candidate) => candidate.id === learningLoop.toSnapshot().masteryProfileId
-    );
     const events = createDomainEventRecorder(located.record.workspace.id);
     const evaluation = this.evaluator.evaluate({
       assessment,
       command,
       events,
-      existingMasteryProfile,
       learningLoop
     });
     if (!evaluation.ok) {
@@ -66,7 +61,7 @@ export class AssessmentAttemptController
 
     const newEvents = events.all();
     const workspace = located.record.workspace.appendEventLedger(newEvents.map((event) => event.id));
-    const updatedRecord = createStudyWorkspaceRecord({
+    const updatedRecord = createLearningLoopRecord({
       workspace,
       tasks: [...located.record.tasks],
       workPlans: [...located.record.workPlans],
@@ -80,12 +75,9 @@ export class AssessmentAttemptController
       attempts: [...located.record.attempts, evaluation.value.attempt],
       evaluations: [...located.record.evaluations, evaluation.value.evaluation],
       knowledgeGaps: [...located.record.knowledgeGaps, ...evaluation.value.knowledgeGaps],
-      masteryProfiles: [
-        ...located.record.masteryProfiles.filter(
-          (candidate) => candidate.id !== evaluation.value.masteryProfile.id
-        ),
-        evaluation.value.masteryProfile
-      ]
+      masteryProfiles: [...located.record.masteryProfiles],
+      practiceActivities: [...located.record.practiceActivities],
+      activeReviewSessions: [...located.record.activeReviewSessions]
     });
 
     this.repository.saveRecord(located.key, updatedRecord);
@@ -96,7 +88,6 @@ export class AssessmentAttemptController
       attempt: evaluation.value.attempt.toSnapshot(),
       evaluation: evaluation.value.evaluation.toSnapshot(),
       knowledgeGaps: evaluation.value.knowledgeGaps.map((gap) => gap.toSnapshot()),
-      masteryProfile: evaluation.value.masteryProfile.toSnapshot(),
       events: newEvents
     });
   }

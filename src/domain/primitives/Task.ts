@@ -14,7 +14,7 @@ export type TaskState =
   | "ready"
   | "running";
 
-export type TaskKind = "assessment" | "study-plan" | "topic-plan";
+export type TaskKind = "assessment" | "practice-activity" | "study-plan" | "topic-plan";
 
 export interface TaskInput {
   objective: string;

@@ -1,12 +1,16 @@
 import type { ArtifactId, WorkPlanId } from "../primitives/ids.js";
+import type { PracticeActivityKind } from "./PracticeActivity.js";
 import type {
+  ActiveReviewSessionId,
   AssessmentId,
   AttemptId,
   EvaluationId,
   KnowledgeGapId,
   LearningLoopId,
+  MasterDataItemId,
   MasterDataSourceId,
   MasteryProfileId,
+  PracticeActivityId,
   WorkspaceId
 } from "../primitives/ids.js";
 import {
@@ -36,6 +40,8 @@ export interface LearningLoopSnapshot {
   knowledgeGapIds: readonly KnowledgeGapId[];
   workPlanIds: readonly WorkPlanId[];
   artifactIds: readonly ArtifactId[];
+  practiceActivityIds: readonly PracticeActivityId[];
+  activeReviewSessionIds: readonly ActiveReviewSessionId[];
   masteryProfileId?: MasteryProfileId;
   sourceIds: readonly MasterDataSourceId[];
   createdAt: string;
@@ -66,6 +72,8 @@ export class LearningLoop {
       knowledgeGapIds: [],
       workPlanIds: [],
       artifactIds: [],
+      practiceActivityIds: [],
+      activeReviewSessionIds: [],
       sourceIds: [...(input.sourceIds ?? [])],
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
@@ -85,6 +93,8 @@ export class LearningLoop {
       knowledgeGapIds: [...snapshot.knowledgeGapIds],
       workPlanIds: [...snapshot.workPlanIds],
       artifactIds: [...snapshot.artifactIds],
+      practiceActivityIds: [...snapshot.practiceActivityIds],
+      activeReviewSessionIds: [...snapshot.activeReviewSessionIds],
       sourceIds: [...snapshot.sourceIds]
     });
   }
@@ -117,40 +127,179 @@ export class LearningLoop {
     return this.snapshot.evaluationIds;
   }
 
-  attachAssessment(assessmentId: AssessmentId, events: DomainEventRecorder): LearningLoop {
-    return this.withLinkedId("assessmentIds", assessmentId, "diagnosis", () =>
-      events.recordLearningLoopAssessmentAttached(this.snapshot.id, assessmentId)
-    );
+  get masteryProfileId(): MasteryProfileId | undefined {
+    return this.snapshot.masteryProfileId;
   }
 
-  recordAttempt(attemptId: AttemptId, events: DomainEventRecorder): LearningLoop {
-    return this.withLinkedId("attemptIds", attemptId, "diagnosis", () =>
-      events.recordLearningLoopAttemptRecorded(this.snapshot.id, attemptId)
-    );
+  get practiceActivityIds(): readonly PracticeActivityId[] {
+    return this.snapshot.practiceActivityIds;
   }
 
-  recordEvaluation(evaluationId: EvaluationId, events: DomainEventRecorder): LearningLoop {
-    return this.withLinkedId("evaluationIds", evaluationId, "study-planning", () =>
-      events.recordLearningLoopEvaluationRecorded(this.snapshot.id, evaluationId)
-    );
+  get activeReviewSessionIds(): readonly ActiveReviewSessionId[] {
+    return this.snapshot.activeReviewSessionIds;
   }
 
-  recordKnowledgeGap(gapId: KnowledgeGapId, events: DomainEventRecorder): LearningLoop {
-    return this.withLinkedId("knowledgeGapIds", gapId, "study-planning", () =>
-      events.recordLearningLoopKnowledgeGapRecorded(this.snapshot.id, gapId)
-    );
+  isDiagnosed(): boolean {
+    return this.snapshot.evaluationIds.length > 0 && this.snapshot.knowledgeGapIds.length > 0;
   }
 
-  attachWorkPlan(workPlanId: WorkPlanId, events: DomainEventRecorder): LearningLoop {
-    return this.withLinkedId("workPlanIds", workPlanId, "practice", () =>
-      events.recordLearningLoopWorkPlanAttached(this.snapshot.id, workPlanId)
-    );
+  recordInitialAssessmentGenerated(
+    input: { assessmentId: AssessmentId; artifactId: ArtifactId },
+    events: DomainEventRecorder
+  ): LearningLoop {
+    events.assertWorkspace(this.snapshot.workspaceId);
+    const next = new LearningLoop({
+      ...this.snapshot,
+      assessmentIds: this.appendUnique(this.snapshot.assessmentIds, input.assessmentId),
+      artifactIds: this.appendUnique(this.snapshot.artifactIds, input.artifactId),
+      phase: "diagnosis",
+      updatedAt: new Date().toISOString()
+    });
+
+    events.recordInitialAssessmentGenerated(this.snapshot.id, input.assessmentId, input.artifactId);
+    return next;
   }
 
-  attachArtifact(artifactId: ArtifactId, events: DomainEventRecorder): LearningLoop {
-    return this.withLinkedId("artifactIds", artifactId, this.snapshot.phase, () =>
-      events.recordLearningLoopArtifactAttached(this.snapshot.id, artifactId)
+  recordAssessmentAttemptSubmitted(
+    input: { assessmentId: AssessmentId; attemptId: AttemptId },
+    events: DomainEventRecorder
+  ): LearningLoop {
+    events.assertWorkspace(this.snapshot.workspaceId);
+    const next = new LearningLoop({
+      ...this.snapshot,
+      attemptIds: this.appendUnique(this.snapshot.attemptIds, input.attemptId),
+      phase: "diagnosis",
+      updatedAt: new Date().toISOString()
+    });
+
+    events.recordAssessmentAttemptSubmitted(this.snapshot.id, input.assessmentId, input.attemptId);
+    return next;
+  }
+
+  recordAssessmentEvaluated(
+    input: { assessmentId: AssessmentId; evaluationId: EvaluationId; score: number },
+    events: DomainEventRecorder
+  ): LearningLoop {
+    events.assertWorkspace(this.snapshot.workspaceId);
+    const next = new LearningLoop({
+      ...this.snapshot,
+      evaluationIds: this.appendUnique(this.snapshot.evaluationIds, input.evaluationId),
+      phase: "study-planning",
+      updatedAt: new Date().toISOString()
+    });
+
+    events.recordAssessmentEvaluated(
+      this.snapshot.id,
+      input.assessmentId,
+      input.evaluationId,
+      input.score
     );
+    return next;
+  }
+
+  identifyKnowledgeGaps(
+    knowledgeGapIds: readonly KnowledgeGapId[],
+    events: DomainEventRecorder
+  ): LearningLoop {
+    events.assertWorkspace(this.snapshot.workspaceId);
+    const nextKnowledgeGapIds = [...this.snapshot.knowledgeGapIds];
+    for (const gapId of knowledgeGapIds) {
+      if (!nextKnowledgeGapIds.includes(gapId)) {
+        nextKnowledgeGapIds.push(gapId);
+      }
+    }
+
+    const next = new LearningLoop({
+      ...this.snapshot,
+      knowledgeGapIds: nextKnowledgeGapIds,
+      phase: "study-planning",
+      updatedAt: new Date().toISOString()
+    });
+
+    events.recordKnowledgeGapsIdentified(this.snapshot.id, knowledgeGapIds);
+    return next;
+  }
+
+  recordStudyPlanAdapted(
+    input: { workPlanId: WorkPlanId; artifactId: ArtifactId; diagnosedGapCount: number },
+    events: DomainEventRecorder
+  ): LearningLoop {
+    events.assertWorkspace(this.snapshot.workspaceId);
+    const next = new LearningLoop({
+      ...this.snapshot,
+      workPlanIds: this.appendUnique(this.snapshot.workPlanIds, input.workPlanId),
+      artifactIds: this.appendUnique(this.snapshot.artifactIds, input.artifactId),
+      phase: "practice",
+      updatedAt: new Date().toISOString()
+    });
+
+    events.recordStudyPlanAdapted(
+      this.snapshot.id,
+      input.workPlanId,
+      input.artifactId,
+      input.diagnosedGapCount
+    );
+    return next;
+  }
+
+  recordPracticeActivityGenerated(
+    input: {
+      practiceActivityId: PracticeActivityId;
+      kind: PracticeActivityKind;
+      targetKnowledgeGapIds: readonly KnowledgeGapId[];
+      sourceMasterDataItemIds: readonly MasterDataItemId[];
+    },
+    events: DomainEventRecorder
+  ): LearningLoop {
+    events.assertWorkspace(this.snapshot.workspaceId);
+    const next = new LearningLoop({
+      ...this.snapshot,
+      practiceActivityIds: this.appendUnique(
+        this.snapshot.practiceActivityIds,
+        input.practiceActivityId
+      ),
+      phase: "practice",
+      updatedAt: new Date().toISOString()
+    });
+
+    events.recordPracticeActivityGenerated(
+      this.snapshot.id,
+      input.practiceActivityId,
+      input.kind,
+      input.targetKnowledgeGapIds,
+      input.sourceMasterDataItemIds
+    );
+    return next;
+  }
+
+  recordPracticeActivityCompleted(
+    input: {
+      activeReviewSessionId: ActiveReviewSessionId;
+      masteryScore: number;
+      practiceActivityId: PracticeActivityId;
+      remainingKnowledgeGapIds: readonly KnowledgeGapId[];
+    },
+    events: DomainEventRecorder
+  ): LearningLoop {
+    events.assertWorkspace(this.snapshot.workspaceId);
+    const next = new LearningLoop({
+      ...this.snapshot,
+      activeReviewSessionIds: this.appendUnique(
+        this.snapshot.activeReviewSessionIds,
+        input.activeReviewSessionId
+      ),
+      knowledgeGapIds: [...input.remainingKnowledgeGapIds],
+      phase: input.remainingKnowledgeGapIds.length > 0 ? "study-planning" : "mastery-tracking",
+      updatedAt: new Date().toISOString()
+    });
+
+    events.recordPracticeActivityCompleted(
+      this.snapshot.id,
+      input.practiceActivityId,
+      input.activeReviewSessionId,
+      input.masteryScore
+    );
+    return next;
   }
 
   attachMasteryProfile(profileId: MasteryProfileId, events: DomainEventRecorder): LearningLoop {
@@ -158,7 +307,6 @@ export class LearningLoop {
     const next = new LearningLoop({
       ...this.snapshot,
       masteryProfileId: profileId,
-      phase: "mastery-tracking",
       updatedAt: new Date().toISOString()
     });
 
@@ -175,29 +323,14 @@ export class LearningLoop {
       knowledgeGapIds: [...this.snapshot.knowledgeGapIds],
       workPlanIds: [...this.snapshot.workPlanIds],
       artifactIds: [...this.snapshot.artifactIds],
+      practiceActivityIds: [...this.snapshot.practiceActivityIds],
+      activeReviewSessionIds: [...this.snapshot.activeReviewSessionIds],
       sourceIds: [...this.snapshot.sourceIds]
     };
   }
 
-  private withLinkedId<TKey extends "artifactIds" | "assessmentIds" | "attemptIds" | "evaluationIds" | "knowledgeGapIds" | "workPlanIds">(
-    key: TKey,
-    value: LearningLoopSnapshot[TKey][number],
-    phase: LearningLoopPhase,
-    onRecord: () => void
-  ): LearningLoop {
-    if (this.snapshot[key].includes(value as never)) {
-      return this;
-    }
-
-    const next = new LearningLoop({
-      ...this.snapshot,
-      [key]: [...this.snapshot[key], value],
-      phase,
-      updatedAt: new Date().toISOString()
-    });
-
-    onRecord();
-    return next;
+  private appendUnique<TValue>(items: readonly TValue[], value: TValue): readonly TValue[] {
+    return items.includes(value) ? items : [...items, value];
   }
 }
 

@@ -1,6 +1,6 @@
 import type { MasterDataItem, MasterDataSource } from "../../domain/learning/MasterData.js";
 import { err, ok, type Result } from "../../domain/primitives/result.js";
-import type { StudyPlanRepository } from "../planning/StudyPlanRepository.js";
+import type { LearningLoopRepository } from "../planning/LearningLoopRepository.js";
 
 export interface SelectedMasterData {
   source: MasterDataSource;
@@ -8,7 +8,7 @@ export interface SelectedMasterData {
 }
 
 export class MasterDataSourceSelector {
-  constructor(private readonly repository: Pick<StudyPlanRepository, "findMasterDataByTopic">) {}
+  constructor(private readonly repository: Pick<LearningLoopRepository, "findMasterDataByTopic">) {}
 
   select(topic: string, questionCount: number): Result<SelectedMasterData> {
     const sources = this.repository.findMasterDataByTopic(topic);

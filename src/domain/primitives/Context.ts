@@ -1,5 +1,6 @@
 import type { CreateStudyPlanCommand } from "../study/StudyPlanning.js";
 import type { CreateInitialAssessmentCommand } from "../study/AssessmentGeneration.js";
+import type { CreatePracticeActivityCommand } from "../study/PracticeActivities.js";
 import type { StudyDay } from "../study/StudySchedule.js";
 import type { LearningLoopId } from "./ids.js";
 
@@ -37,6 +38,19 @@ export interface InitialAssessmentContextSnapshot {
   sourceName: string;
   knownFacts: readonly ContextFact<
     "learner" | "question-count" | "source" | "topic"
+  >[];
+}
+
+export interface PracticeActivityContextSnapshot {
+  learnerName: string;
+  yearGroup: string;
+  learningLoopId: LearningLoopId;
+  topic: string;
+  cardCount: number;
+  diagnosedGaps: readonly string[];
+  sourceNames: readonly string[];
+  knownFacts: readonly ContextFact<
+    "card-count" | "diagnosed-gaps" | "learner" | "learning-loop" | "source" | "topic"
   >[];
 }
 
@@ -201,6 +215,90 @@ export class InitialAssessmentContext {
   }
 
   facts(): readonly ContextFact<"learner" | "question-count" | "source" | "topic">[] {
+    return this.snapshot.knownFacts;
+  }
+}
+
+export class PracticeActivityContext {
+  private constructor(private readonly snapshot: PracticeActivityContextSnapshot) {}
+
+  static create(input: {
+    command: CreatePracticeActivityCommand;
+    diagnosedGaps: readonly string[];
+    learnerName: string;
+    learningLoopId: LearningLoopId;
+    sourceNames: readonly string[];
+    topic: string;
+    yearGroup: string;
+  }): PracticeActivityContext {
+    const knownFacts: readonly ContextFact<
+      "card-count" | "diagnosed-gaps" | "learner" | "learning-loop" | "source" | "topic"
+    >[] = [
+      {
+        label: "learner",
+        value: `${input.learnerName} (${input.yearGroup})`
+      },
+      {
+        label: "learning-loop",
+        value: input.learningLoopId
+      },
+      {
+        label: "topic",
+        value: input.topic
+      },
+      {
+        label: "card-count",
+        value: String(input.command.cardCount)
+      },
+      {
+        label: "diagnosed-gaps",
+        value: input.diagnosedGaps.join(", ")
+      },
+      {
+        label: "source",
+        value: input.sourceNames.join(", ")
+      }
+    ];
+
+    return new PracticeActivityContext({
+      learnerName: input.learnerName,
+      yearGroup: input.yearGroup,
+      learningLoopId: input.learningLoopId,
+      topic: input.topic,
+      cardCount: input.command.cardCount,
+      diagnosedGaps: [...input.diagnosedGaps],
+      sourceNames: [...input.sourceNames],
+      knownFacts
+    });
+  }
+
+  get learningLoopId(): LearningLoopId {
+    return this.snapshot.learningLoopId;
+  }
+
+  get learnerName(): string {
+    return this.snapshot.learnerName;
+  }
+
+  get yearGroup(): string {
+    return this.snapshot.yearGroup;
+  }
+
+  get topic(): string {
+    return this.snapshot.topic;
+  }
+
+  get cardCount(): number {
+    return this.snapshot.cardCount;
+  }
+
+  get diagnosedGaps(): readonly string[] {
+    return this.snapshot.diagnosedGaps;
+  }
+
+  facts(): readonly ContextFact<
+    "card-count" | "diagnosed-gaps" | "learner" | "learning-loop" | "source" | "topic"
+  >[] {
     return this.snapshot.knownFacts;
   }
 }

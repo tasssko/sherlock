@@ -3,15 +3,17 @@ import { InitialAssessmentController } from "../src/modules/assessment/InitialAs
 import { AssessmentAttemptController } from "../src/modules/assessment/AssessmentAttemptController.js";
 import { MasterDataUploadController } from "../src/modules/assessment/MasterDataUploadController.js";
 import { StudyPlanController } from "../src/modules/planning/StudyPlanController.js";
-import { SqliteStudyPlanRepository } from "../src/modules/planning/StudyPlanRepository.js";
+import { SqliteLearningLoopRepository } from "../src/modules/planning/SqliteLearningLoopRepository.js";
+import { PracticeActivityController } from "../src/modules/practice/PracticeActivityController.js";
 import { studyDays } from "../src/domain/study/StudySchedule.js";
 
 describe("Learning loop flow", () => {
-  it("starts with an initial assessment, records attempts, diagnoses gaps, and tailors the study plan", () => {
-    const repository = new SqliteStudyPlanRepository(":memory:");
+  it("uses active review evidence to refresh gaps, update mastery, and adapt the next study plan", () => {
+    const repository = new SqliteLearningLoopRepository(":memory:");
     const uploadController = new MasterDataUploadController(repository);
     const assessmentController = new InitialAssessmentController(repository);
     const attemptController = new AssessmentAttemptController(repository);
+    const practiceController = new PracticeActivityController(repository);
     const studyPlanController = new StudyPlanController(repository);
 
     const upload = uploadController.execute({
@@ -66,9 +68,21 @@ describe("Learning loop flow", () => {
         "learning-loop.created",
         "assessment.created",
         "assessment.artifact-attached",
-        "learning-loop.assessment-attached",
+        "initial-assessment.generated",
         "artifact.generated"
       ])
+    );
+    const initialAssessmentGenerated = assessment.value.events.find(
+      (event) => event.type === "initial-assessment.generated"
+    );
+    expect(initialAssessmentGenerated?.payload).toMatchObject({
+      learningLoopId: assessment.value.learningLoop.id,
+      assessmentId: assessment.value.assessment.id,
+      artifactId: assessment.value.artifact.id
+    });
+    const initialAssessmentEventTypes = assessment.value.events.map((event) => event.type);
+    expect(initialAssessmentEventTypes.indexOf("learning-loop.created")).toBeLessThan(
+      initialAssessmentEventTypes.indexOf("initial-assessment.generated")
     );
 
     const attempt = attemptController.execute({
@@ -86,22 +100,118 @@ describe("Learning loop flow", () => {
 
     expect(attempt.value.learningLoop.evaluationIds).toHaveLength(1);
     expect(attempt.value.knowledgeGaps).toHaveLength(3);
-    expect(attempt.value.masteryProfile.topics).toEqual([
+    expect(attempt.value.masteryProfile).toBeUndefined();
+    expect(attempt.value.events.map((event) => event.type)).toEqual(
+      expect.arrayContaining([
+        "attempt.created",
+        "evaluation.created",
+        "assessment-attempt.submitted",
+        "assessment.evaluated",
+        "knowledge-gaps.identified"
+      ])
+    );
+    const attemptSubmitted = attempt.value.events.find(
+      (event) => event.type === "assessment-attempt.submitted"
+    );
+    const assessmentEvaluated = attempt.value.events.find(
+      (event) => event.type === "assessment.evaluated"
+    );
+    const knowledgeGapsIdentified = attempt.value.events.find(
+      (event) => event.type === "knowledge-gaps.identified"
+    );
+    expect(attemptSubmitted?.payload).toMatchObject({
+      learningLoopId: assessment.value.learningLoop.id,
+      assessmentId: assessment.value.assessment.id,
+      attemptId: attempt.value.attempt.id
+    });
+    expect(assessmentEvaluated?.payload).toMatchObject({
+      learningLoopId: assessment.value.learningLoop.id,
+      assessmentId: assessment.value.assessment.id,
+      evaluationId: attempt.value.evaluation.id
+    });
+    expect(knowledgeGapsIdentified?.payload).toMatchObject({
+      learningLoopId: assessment.value.learningLoop.id
+    });
+    const attemptEventTypes = attempt.value.events.map((event) => event.type);
+    expect(attemptEventTypes.indexOf("assessment-attempt.submitted")).toBeLessThan(
+      attemptEventTypes.indexOf("assessment.evaluated")
+    );
+    expect(attemptEventTypes.indexOf("assessment.evaluated")).toBeLessThan(
+      attemptEventTypes.indexOf("knowledge-gaps.identified")
+    );
+
+    const practice = practiceController.generate({
+      learningLoopId: assessment.value.learningLoop.id,
+      kind: "flashcard_set",
+      cardCount: 3
+    });
+
+    expect(practice.ok).toBe(true);
+    if (!practice.ok) {
+      return;
+    }
+
+    expect(practice.value.practiceActivity.targetKnowledgeGapIds).toEqual(
+      expect.arrayContaining(attempt.value.knowledgeGaps.map((gap) => gap.id))
+    );
+    expect(practice.value.practiceActivity.flashcardSet.cards).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          sourceMasterDataItemId: expect.any(String),
+          knowledgeGapId: expect.any(String),
+          sourceVisibleSentence: expect.any(String)
+        })
+      ])
+    );
+    const practiceGenerated = practice.value.events.find(
+      (event) => event.type === "practice-activity.generated"
+    );
+    expect(practiceGenerated?.payload).toMatchObject({
+      learningLoopId: assessment.value.learningLoop.id,
+      practiceActivityId: practice.value.practiceActivity.id
+    });
+    const practiceEventTypes = practice.value.events.map((event) => event.type);
+    expect(practiceEventTypes.indexOf("agent.invoked")).toBeLessThan(
+      practiceEventTypes.indexOf("practice-activity.generated")
+    );
+
+    const completion = practiceController.complete({
+      practiceActivityId: practice.value.practiceActivity.id,
+      responses: practice.value.practiceActivity.flashcardSet.cards.map((card, index) => ({
+        practiceItemId: card.id,
+        responseText: index === 0 ? card.back : "wrong answer",
+        confidence: index === 0 ? "high" as const : "low" as const
+      }))
+    });
+
+    expect(completion.ok).toBe(true);
+    if (!completion.ok) {
+      return;
+    }
+
+    expect(completion.value.activeReviewSession.itemResults).toHaveLength(3);
+    expect(completion.value.practiceActivity.reviewSessionIds).toHaveLength(1);
+    expect(completion.value.learningLoop.activeReviewSessionIds).toHaveLength(1);
+    expect(completion.value.learningLoop.knowledgeGapIds).toHaveLength(2);
+    expect(completion.value.masteryProfile.topics).toEqual([
       expect.objectContaining({
         topic: "fractions",
         status: "developing"
       })
     ]);
-    expect(attempt.value.events.map((event) => event.type)).toEqual(
-      expect.arrayContaining([
-        "attempt.created",
-        "evaluation.created",
-        "learning-loop.attempt-recorded",
-        "learning-loop.evaluation-recorded",
-        "learning-loop.knowledge-gap-recorded",
-        "learning-loop.mastery-profile-updated"
-      ])
+    const practiceCompleted = completion.value.events.find(
+      (event) => event.type === "practice-activity.completed"
     );
+    expect(practiceCompleted?.payload).toMatchObject({
+      learningLoopId: assessment.value.learningLoop.id,
+      practiceActivityId: practice.value.practiceActivity.id,
+      activeReviewSessionId: completion.value.activeReviewSession.id
+    });
+    const completionEventTypes = completion.value.events.map((event) => event.type);
+    expect(completionEventTypes.indexOf("practice-activity.completed")).toBeLessThan(
+      completionEventTypes.indexOf("learning-loop.mastery-profile-updated")
+    );
+    expect(completion.value.activeReviewSession.reviewIntervalHours).toBe(12);
 
     const studyPlan = studyPlanController.execute({
       learnerName: "Year 7 learner",
@@ -119,7 +229,7 @@ describe("Learning loop flow", () => {
     }
 
     expect(studyPlan.value.learningLoop.id).toBe(assessment.value.learningLoop.id);
-    expect(studyPlan.value.knowledgeGaps).toHaveLength(3);
+    expect(studyPlan.value.knowledgeGaps).toHaveLength(2);
     expect(studyPlan.value.masteryProfile?.topics).toEqual([
       expect.objectContaining({
         topic: "fractions",
@@ -132,10 +242,17 @@ describe("Learning loop flow", () => {
     expect(studyPlan.value.events.every((event) => event.workspaceId === studyPlan.value.workspace.id)).toBe(
       true
     );
+    const studyPlanAdapted = studyPlan.value.events.find((event) => event.type === "study-plan.adapted");
+    expect(studyPlanAdapted?.payload).toMatchObject({
+      learningLoopId: assessment.value.learningLoop.id,
+      workPlanId: studyPlan.value.workPlan.id,
+      artifactId: studyPlan.value.artifact.id,
+      diagnosedGapCount: 2
+    });
   });
 
   it("rejects assessment items that leak answers from visible study material", () => {
-    const repository = new SqliteStudyPlanRepository(":memory:");
+    const repository = new SqliteLearningLoopRepository(":memory:");
     const uploadController = new MasterDataUploadController(repository);
     const assessmentController = new InitialAssessmentController(repository);
 

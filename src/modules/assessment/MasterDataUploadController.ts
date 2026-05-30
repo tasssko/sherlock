@@ -5,14 +5,13 @@ import type {
   UploadMasterDataCommand
 } from "../../domain/study/MasterDataUpload.js";
 import {
-  SqliteStudyPlanRepository,
-  type StudyPlanRepository
-} from "../planning/StudyPlanRepository.js";
+  type LearningLoopRepository
+} from "../planning/LearningLoopRepository.js";
 
 export class MasterDataUploadController
   implements Controller<UploadMasterDataCommand, MasterDataUploadResponse>
 {
-  constructor(private readonly repository: StudyPlanRepository = new SqliteStudyPlanRepository()) {}
+  constructor(private readonly repository: LearningLoopRepository) {}
 
   execute(command: UploadMasterDataCommand): Result<MasterDataUploadResponse> {
     return ok(this.repository.registerMasterData(command));

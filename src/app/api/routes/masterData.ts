@@ -20,7 +20,7 @@ const uploadMasterDataSchema = z.object({
 
 export async function registerMasterDataRoutes(
   server: FastifyInstance,
-  controller = new MasterDataUploadController()
+  controller: MasterDataUploadController
 ): Promise<void> {
   server.post("/v1/master-data", async (request, reply) => {
     const parsed = uploadMasterDataSchema.safeParse(request.body);

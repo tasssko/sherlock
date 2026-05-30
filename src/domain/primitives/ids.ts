@@ -3,6 +3,7 @@ export type Brand<TValue, TBrand extends string> = TValue & {
 };
 
 export type AgentId = Brand<string, "AgentId">;
+export type ActiveReviewSessionId = Brand<string, "ActiveReviewSessionId">;
 export type ArtifactId = Brand<string, "ArtifactId">;
 export type AssessmentId = Brand<string, "AssessmentId">;
 export type AttemptId = Brand<string, "AttemptId">;
@@ -13,6 +14,7 @@ export type LearningLoopId = Brand<string, "LearningLoopId">;
 export type MasterDataItemId = Brand<string, "MasterDataItemId">;
 export type MasterDataSourceId = Brand<string, "MasterDataSourceId">;
 export type MasteryProfileId = Brand<string, "MasteryProfileId">;
+export type PracticeActivityId = Brand<string, "PracticeActivityId">;
 export type TaskId = Brand<string, "TaskId">;
 export type WorkPlanId = Brand<string, "WorkPlanId">;
 export type WorkspaceId = Brand<string, "WorkspaceId">;
@@ -27,6 +29,10 @@ function createId(prefix: string): string {
 
 export function createAgentId(): AgentId {
   return createId("agent") as AgentId;
+}
+
+export function createActiveReviewSessionId(): ActiveReviewSessionId {
+  return createId("review") as ActiveReviewSessionId;
 }
 
 export function createArtifactId(): ArtifactId {
@@ -67,6 +73,10 @@ export function createMasterDataSourceId(): MasterDataSourceId {
 
 export function createMasteryProfileId(): MasteryProfileId {
   return createId("mastery") as MasteryProfileId;
+}
+
+export function createPracticeActivityId(): PracticeActivityId {
+  return createId("practice") as PracticeActivityId;
 }
 
 export function createTaskId(): TaskId {

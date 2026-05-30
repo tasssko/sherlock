@@ -58,6 +58,6 @@ export interface AssessmentAttemptResponse {
   attempt: AttemptSnapshot;
   evaluation: EvaluationSnapshot;
   knowledgeGaps: readonly KnowledgeGapSnapshot[];
-  masteryProfile: MasteryProfileSnapshot;
+  masteryProfile?: MasteryProfileSnapshot;
   events: readonly DomainEvent[];
 }

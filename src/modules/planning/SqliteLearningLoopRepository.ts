@@ -1,6 +1,7 @@
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { ActiveReviewSession } from "../../domain/learning/ActiveReviewSession.js";
 import { Assessment, Attempt, Evaluation } from "../../domain/learning/Assessment.js";
 import {
   KnowledgeGap,
@@ -8,6 +9,7 @@ import {
   MasteryProfile
 } from "../../domain/learning/LearningLoop.js";
 import { MasterDataItem, MasterDataSource } from "../../domain/learning/MasterData.js";
+import { PracticeActivity } from "../../domain/learning/PracticeActivity.js";
 import type { Artifact, ArtifactType } from "../../domain/primitives/Artifact.js";
 import { Artifact as ArtifactEntity } from "../../domain/primitives/Artifact.js";
 import type { DomainEvent } from "../../domain/primitives/Event.js";
@@ -17,58 +19,18 @@ import type { WorkPlan } from "../../domain/primitives/WorkPlan.js";
 import { WorkPlan as WorkPlanEntity } from "../../domain/primitives/WorkPlan.js";
 import type { Workspace } from "../../domain/primitives/Workspace.js";
 import { Workspace as WorkspaceEntity } from "../../domain/primitives/Workspace.js";
-import type { AssessmentId } from "../../domain/primitives/ids.js";
+import type { AssessmentId, LearningLoopId, PracticeActivityId } from "../../domain/primitives/ids.js";
 import type {
   MasterDataUploadResponse,
   UploadMasterDataCommand
 } from "../../domain/study/MasterDataUpload.js";
-import { StudyPlanRepositoryKey } from "./StudyPlanRepositoryKey.js";
-
-export interface StudyWorkspaceRecord {
-  workspace: Workspace;
-  tasks: readonly Task[];
-  workPlans: readonly WorkPlan[];
-  artifacts: readonly Artifact<unknown, ArtifactType>[];
-  events: readonly DomainEvent[];
-  learningLoops: readonly LearningLoop[];
-  assessments: readonly Assessment[];
-  attempts: readonly Attempt[];
-  evaluations: readonly Evaluation[];
-  knowledgeGaps: readonly KnowledgeGap[];
-  masteryProfiles: readonly MasteryProfile[];
-}
-
-export function createStudyWorkspaceRecord(record: StudyWorkspaceRecord): StudyWorkspaceRecord {
-  return {
-    workspace: record.workspace,
-    tasks: [...record.tasks],
-    workPlans: [...record.workPlans],
-    artifacts: [...record.artifacts],
-    events: [...record.events],
-    learningLoops: [...record.learningLoops],
-    assessments: [...record.assessments],
-    attempts: [...record.attempts],
-    evaluations: [...record.evaluations],
-    knowledgeGaps: [...record.knowledgeGaps],
-    masteryProfiles: [...record.masteryProfiles]
-  };
-}
-
-export interface LocatedStudyWorkspaceRecord {
-  key: StudyPlanRepositoryKey;
-  record: StudyWorkspaceRecord;
-}
-
-export interface StudyPlanRepository {
-  findMasterDataByTopic(topic: string): {
-    source: MasterDataSource;
-    items: readonly MasterDataItem[];
-  }[];
-  findRecord(key: StudyPlanRepositoryKey): StudyWorkspaceRecord | undefined;
-  findRecordByAssessmentId(assessmentId: AssessmentId): LocatedStudyWorkspaceRecord | undefined;
-  registerMasterData(command: UploadMasterDataCommand): MasterDataUploadResponse;
-  saveRecord(key: StudyPlanRepositoryKey, record: StudyWorkspaceRecord): void;
-}
+import { LearnerWorkspaceKey } from "./LearnerWorkspaceKey.js";
+import {
+  createLearningLoopRecord,
+  type LearningLoopRecord,
+  type LearningLoopRepository,
+  type LocatedLearningLoopRecord
+} from "./LearningLoopRepository.js";
 
 function parseSnapshot<T>(value: unknown): T {
   return JSON.parse(String(value)) as T;
@@ -82,7 +44,7 @@ function ensureDirectory(pathname: string): void {
   mkdirSync(dirname(pathname), { recursive: true });
 }
 
-export class SqliteStudyPlanRepository implements StudyPlanRepository {
+export class SqliteLearningLoopRepository implements LearningLoopRepository {
   private readonly database: DatabaseSync;
 
   constructor(pathname = process.env.SHERLOCK_DB_PATH ?? "./data/sherlock.sqlite") {
@@ -91,7 +53,7 @@ export class SqliteStudyPlanRepository implements StudyPlanRepository {
     this.migrate();
   }
 
-  findRecord(key: StudyPlanRepositoryKey): StudyWorkspaceRecord | undefined {
+  findRecord(key: LearnerWorkspaceKey): LearningLoopRecord | undefined {
     const workspaceRow = this.database
       .prepare("select snapshot from workspaces where learner_key = ?")
       .get(key.value) as { snapshot: string } | undefined;
@@ -153,8 +115,20 @@ export class SqliteStudyPlanRepository implements StudyPlanRepository {
       .map((row) =>
         MasteryProfile.rehydrate(parseSnapshot((row as { snapshot: string }).snapshot))
       );
+    const practiceActivities = this.database
+      .prepare("select snapshot from practice_activities where learner_key = ? order by rowid asc")
+      .all(key.value)
+      .map((row) =>
+        PracticeActivity.rehydrate(parseSnapshot((row as { snapshot: string }).snapshot))
+      );
+    const activeReviewSessions = this.database
+      .prepare("select snapshot from active_review_sessions where learner_key = ? order by rowid asc")
+      .all(key.value)
+      .map((row) =>
+        ActiveReviewSession.rehydrate(parseSnapshot((row as { snapshot: string }).snapshot))
+      );
 
-    return createStudyWorkspaceRecord({
+    return createLearningLoopRecord({
       workspace,
       tasks,
       workPlans,
@@ -165,11 +139,13 @@ export class SqliteStudyPlanRepository implements StudyPlanRepository {
       attempts,
       evaluations,
       knowledgeGaps,
-      masteryProfiles
+      masteryProfiles,
+      practiceActivities,
+      activeReviewSessions
     });
   }
 
-  findRecordByAssessmentId(assessmentId: AssessmentId): LocatedStudyWorkspaceRecord | undefined {
+  findRecordByAssessmentId(assessmentId: AssessmentId): LocatedLearningLoopRecord | undefined {
     const row = this.database
       .prepare("select learner_key from assessments where id = ?")
       .get(assessmentId) as { learner_key: string } | undefined;
@@ -178,7 +154,39 @@ export class SqliteStudyPlanRepository implements StudyPlanRepository {
       return undefined;
     }
 
-    const key = StudyPlanRepositoryKey.fromValue(row.learner_key);
+    const key = LearnerWorkspaceKey.fromValue(row.learner_key);
+    const record = this.findRecord(key);
+
+    return record ? { key, record } : undefined;
+  }
+
+  findRecordByLearningLoopId(learningLoopId: LearningLoopId): LocatedLearningLoopRecord | undefined {
+    const row = this.database
+      .prepare("select learner_key from learning_loops where id = ?")
+      .get(learningLoopId) as { learner_key: string } | undefined;
+
+    if (!row) {
+      return undefined;
+    }
+
+    const key = LearnerWorkspaceKey.fromValue(row.learner_key);
+    const record = this.findRecord(key);
+
+    return record ? { key, record } : undefined;
+  }
+
+  findRecordByPracticeActivityId(
+    practiceActivityId: PracticeActivityId
+  ): LocatedLearningLoopRecord | undefined {
+    const row = this.database
+      .prepare("select learner_key from practice_activities where id = ?")
+      .get(practiceActivityId) as { learner_key: string } | undefined;
+
+    if (!row) {
+      return undefined;
+    }
+
+    const key = LearnerWorkspaceKey.fromValue(row.learner_key);
     const record = this.findRecord(key);
 
     return record ? { key, record } : undefined;
@@ -227,9 +235,7 @@ export class SqliteStudyPlanRepository implements StudyPlanRepository {
     this.database.exec("begin");
     try {
       this.database
-        .prepare(
-          "insert into master_data_sources (id, name, snapshot) values (?, ?, ?)"
-        )
+        .prepare("insert into master_data_sources (id, name, snapshot) values (?, ?, ?)")
         .run(source.id, source.name, JSON.stringify(source.toSnapshot()));
 
       const insertItem = this.database.prepare(
@@ -260,7 +266,7 @@ export class SqliteStudyPlanRepository implements StudyPlanRepository {
     };
   }
 
-  saveRecord(key: StudyPlanRepositoryKey, record: StudyWorkspaceRecord): void {
+  saveRecord(key: LearnerWorkspaceKey, record: LearningLoopRecord): void {
     this.database.exec("begin");
     try {
       this.database.prepare("delete from workspaces where learner_key = ?").run(key.value);
@@ -274,6 +280,8 @@ export class SqliteStudyPlanRepository implements StudyPlanRepository {
       this.database.prepare("delete from evaluations where learner_key = ?").run(key.value);
       this.database.prepare("delete from knowledge_gaps where learner_key = ?").run(key.value);
       this.database.prepare("delete from mastery_profiles where learner_key = ?").run(key.value);
+      this.database.prepare("delete from practice_activities where learner_key = ?").run(key.value);
+      this.database.prepare("delete from active_review_sessions where learner_key = ?").run(key.value);
 
       this.database
         .prepare("insert into workspaces (id, learner_key, snapshot) values (?, ?, ?)")
@@ -353,6 +361,34 @@ export class SqliteStudyPlanRepository implements StudyPlanRepository {
         );
       }
 
+      const insertPracticeActivity = this.database.prepare(
+        `insert into practice_activities (id, learner_key, learning_loop_id, snapshot)
+         values (?, ?, ?, ?)`
+      );
+      for (const practiceActivity of record.practiceActivities) {
+        insertPracticeActivity.run(
+          practiceActivity.id,
+          key.value,
+          practiceActivity.learningLoopId,
+          JSON.stringify(practiceActivity.toSnapshot())
+        );
+      }
+
+      const insertActiveReviewSession = this.database.prepare(
+        `insert into active_review_sessions (id, learner_key, practice_activity_id, learning_loop_id, snapshot)
+         values (?, ?, ?, ?, ?)`
+      );
+      for (const activeReviewSession of record.activeReviewSessions) {
+        const snapshot = activeReviewSession.toSnapshot();
+        insertActiveReviewSession.run(
+          snapshot.id,
+          key.value,
+          snapshot.practiceActivityId,
+          snapshot.learningLoopId,
+          JSON.stringify(snapshot)
+        );
+      }
+
       this.database.exec("commit");
     } catch (error) {
       this.database.exec("rollback");
@@ -415,6 +451,19 @@ export class SqliteStudyPlanRepository implements StudyPlanRepository {
       create table if not exists mastery_profiles (
         id text primary key,
         learner_key text not null,
+        snapshot text not null
+      );
+      create table if not exists practice_activities (
+        id text primary key,
+        learner_key text not null,
+        learning_loop_id text not null,
+        snapshot text not null
+      );
+      create table if not exists active_review_sessions (
+        id text primary key,
+        learner_key text not null,
+        practice_activity_id text not null,
+        learning_loop_id text not null,
         snapshot text not null
       );
       create table if not exists master_data_sources (

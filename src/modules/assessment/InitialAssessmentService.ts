@@ -4,7 +4,7 @@ import { Workspace } from "../../domain/primitives/Workspace.js";
 import { type Result } from "../../domain/primitives/result.js";
 import type { CreateInitialAssessmentCommand } from "../../domain/study/AssessmentGeneration.js";
 import { LearningLoopSelector } from "../learning/LearningLoopSelector.js";
-import type { StudyWorkspaceRecord } from "../planning/StudyPlanRepository.js";
+import type { LearningLoopRecord } from "../planning/LearningLoopRepository.js";
 import { AssessmentTaskAssembler } from "./AssessmentTaskAssembler.js";
 import type { InitialAssessmentAggregate } from "./AssessmentProjector.js";
 import { InitialAssessmentAssembler } from "./InitialAssessmentAssembler.js";
@@ -13,7 +13,7 @@ import { WorkspaceAssessmentAssembler } from "./WorkspaceAssessmentAssembler.js"
 
 export interface InitialAssessmentServiceResult {
   aggregate: InitialAssessmentAggregate;
-  record: StudyWorkspaceRecord;
+  record: LearningLoopRecord;
 }
 
 export class InitialAssessmentService {
@@ -27,7 +27,7 @@ export class InitialAssessmentService {
 
   run(
     command: CreateInitialAssessmentCommand,
-    record?: StudyWorkspaceRecord
+    record?: LearningLoopRecord
   ): Result<InitialAssessmentServiceResult> {
     const sourceSelection = this.sourceSelector.select(command.topic, command.questionCount);
     if (!sourceSelection.ok) {
@@ -46,14 +46,15 @@ export class InitialAssessmentService {
         activeObjective: `Diagnose and improve ${command.topic}.`
       });
     const events = createDomainEventRecorder(workspace.id);
-    const learningLoop = this.loopSelector.findOrCreate({
-      objective: `Build secure understanding in ${command.topic}.`,
-      record,
-      topic: command.topic,
-      workspace,
-      events,
-      sourceIds: [sourceSelection.value.source.id]
-    });
+    const learningLoop =
+      this.loopSelector.findByTopic(record, command.topic) ??
+      this.loopSelector.createForInitialAssessment({
+        objective: `Build secure understanding in ${command.topic}.`,
+        topic: command.topic,
+        workspace,
+        events,
+        sourceIds: [sourceSelection.value.source.id]
+      });
     const context = InitialAssessmentContext.create({
       command,
       sourceName: sourceSelection.value.source.name

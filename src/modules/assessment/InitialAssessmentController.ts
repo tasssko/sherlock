@@ -5,10 +5,9 @@ import type {
   InitialAssessmentResponse
 } from "../../domain/study/AssessmentGeneration.js";
 import {
-  SqliteStudyPlanRepository,
-  type StudyPlanRepository
-} from "../planning/StudyPlanRepository.js";
-import { StudyPlanRepositoryKey } from "../planning/StudyPlanRepositoryKey.js";
+  type LearningLoopRepository
+} from "../planning/LearningLoopRepository.js";
+import { LearnerWorkspaceKey } from "../planning/LearnerWorkspaceKey.js";
 import { AssessmentProjector } from "./AssessmentProjector.js";
 import { InitialAssessmentService } from "./InitialAssessmentService.js";
 import { MasterDataSourceSelector } from "./MasterDataSourceSelector.js";
@@ -19,7 +18,7 @@ export class InitialAssessmentController
   private readonly service: InitialAssessmentService;
 
   constructor(
-    private readonly repository: StudyPlanRepository = new SqliteStudyPlanRepository(),
+    private readonly repository: LearningLoopRepository,
     service?: InitialAssessmentService,
     private readonly projector = new AssessmentProjector()
   ) {
@@ -27,7 +26,7 @@ export class InitialAssessmentController
   }
 
   execute(command: CreateInitialAssessmentCommand): Result<InitialAssessmentResponse> {
-    const key = StudyPlanRepositoryKey.fromLearner(command.learnerName, command.yearGroup);
+    const key = LearnerWorkspaceKey.fromLearner(command.learnerName, command.yearGroup);
     const record = this.repository.findRecord(key);
     const result = this.service.run(command, record);
     if (!result.ok) {

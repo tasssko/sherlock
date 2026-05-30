@@ -1,3 +1,4 @@
+import type { ActiveReviewSession } from "../../domain/learning/ActiveReviewSession.js";
 import type { KnowledgeGap, LearningLoop, MasteryProfile } from "../../domain/learning/LearningLoop.js";
 import type { CreateStudyPlanCommand } from "../../domain/study/StudyPlanning.js";
 
@@ -9,6 +10,7 @@ export interface StudyPlanAdaptationResult {
 
 export class StudyPlanAdaptation {
   adapt(input: {
+    activeReviewSessions?: readonly ActiveReviewSession[];
     command: CreateStudyPlanCommand;
     learningLoop?: LearningLoop;
     knowledgeGaps: readonly KnowledgeGap[];
@@ -20,14 +22,28 @@ export class StudyPlanAdaptation {
     const developingTopics =
       masterySnapshot?.topics.filter((topic) => topic.status === "developing").map((topic) => topic.topic) ??
       [];
-    const combinedTopics = [...new Set([...gapTopics, ...developingTopics, ...prioritisedTopics])];
+    const recentReviewTopics = [
+      ...new Set(
+        (input.activeReviewSessions ?? [])
+          .flatMap((session) => session.itemResults)
+          .filter((result) => !result.correct || result.confidence !== "high")
+          .map((result) => result.topic)
+      )
+    ];
+    const combinedTopics = [
+      ...new Set([...gapTopics, ...recentReviewTopics, ...developingTopics, ...prioritisedTopics])
+    ];
+    const reviewEvidenceNote =
+      recentReviewTopics.length > 0
+        ? ` Prioritise remaining gaps surfaced in recent practice across ${recentReviewTopics.join(", ")}.`
+        : "";
 
     return {
       diagnosedGaps: gapTopics,
       focusTopics: combinedTopics.length > 0 ? combinedTopics : input.command.focusTopics,
       objective:
         gapTopics.length > 0
-          ? `${input.command.objective} Prioritise diagnosed gaps in ${gapTopics.join(", ")}.`
+          ? `${input.command.objective} Prioritise diagnosed gaps in ${gapTopics.join(", ")}.${reviewEvidenceNote}`
           : input.command.objective
     };
   }

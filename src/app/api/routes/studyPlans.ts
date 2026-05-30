@@ -22,7 +22,7 @@ const createStudyPlanSchema = z.object({
 
 export async function registerStudyPlanRoutes(
   server: FastifyInstance,
-  controller = new StudyPlanController()
+  controller: StudyPlanController
 ): Promise<void> {
   server.post("/v1/study-plans", async (request, reply) => {
     const parsed = createStudyPlanSchema.safeParse(request.body);
