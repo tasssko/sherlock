@@ -11,8 +11,12 @@ Principles:
 
 The current screen intentionally exposes:
 
+- learner loop setup and master-data upload
+- initial assessment generation and attempt submission
 - workspace metadata
 - learning loop metadata
+- next action guidance
+- practice activity generation and review completion
 - task graph nodes and dependencies
 - work plan stages
 - study-plan artifact sessions
@@ -21,11 +25,17 @@ The current screen intentionally exposes:
 
 Current UI split:
 
-- study-plan request form
+- loop setup form
+- master-data paste form
 - API adapters
+- assessment attempt form
+- practice activity and completion forms
+- next action view
 - workspace snapshot view
 - learning loop view
 - task graph view
 - work plan view
 - study-plan artifact view
 - event timeline
+
+The frontend does not call Relay routes directly and does not consume Relay task, work plan, artifact, or agent identifiers.

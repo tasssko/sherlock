@@ -53,7 +53,7 @@ describe("Route boundaries", () => {
     }
   });
 
-  it("supports the shared learning-loop flow across upload, assessment, attempt, and study-plan routes", async () => {
+  it("supports the MVP golden path across loop.study routes", async () => {
     const server = await createServer();
 
     try {
@@ -116,6 +116,31 @@ describe("Route boundaries", () => {
         ])
       );
 
+      const studyPlanResponse = await server.inject({
+        method: "POST",
+        url: "/v1/study-plans",
+        payload: validStudyPlanBody
+      });
+
+      expect(studyPlanResponse.statusCode).toBe(201);
+      expect(studyPlanResponse.json()).toMatchObject({
+        learningLoopId: assessmentPayload.learningLoop.id,
+        phase: expect.any(String),
+        nextAction: expect.objectContaining({
+          kind: expect.any(String),
+          summary: expect.any(String)
+        })
+      });
+      expect(studyPlanResponse.json().learningLoop.id).toBe(assessmentPayload.learningLoop.id);
+      expect(Array.isArray(studyPlanResponse.json().knowledgeGaps)).toBe(true);
+      expect(studyPlanResponse.json().knowledgeGaps).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            topic: "fractions"
+          })
+        ])
+      );
+
       const practiceResponse = await server.inject({
         method: "POST",
         url: `/v1/learning-loops/${assessmentPayload.learningLoop.id}/practice-activities`,
@@ -158,6 +183,14 @@ describe("Route boundaries", () => {
       });
 
       expect(practiceCompletionResponse.statusCode).toBe(201);
+      expect(practiceCompletionResponse.json()).toMatchObject({
+        learningLoopId: assessmentPayload.learningLoop.id,
+        phase: expect.any(String),
+        nextAction: expect.objectContaining({
+          kind: expect.any(String),
+          summary: expect.any(String)
+        })
+      });
       expect(practiceCompletionResponse.json().activeReviewSession.itemResults).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
@@ -173,16 +206,13 @@ describe("Route boundaries", () => {
           })
         ])
       );
-
-      const studyPlanResponse = await server.inject({
-        method: "POST",
-        url: "/v1/study-plans",
-        payload: validStudyPlanBody
-      });
-
-      expect(studyPlanResponse.statusCode).toBe(201);
-      expect(studyPlanResponse.json().learningLoop.id).toBe(assessmentPayload.learningLoop.id);
-      expect(Array.isArray(studyPlanResponse.json().knowledgeGaps)).toBe(true);
+      expect(practiceCompletionResponse.json().activeReviewSession).toEqual(
+        expect.objectContaining({
+          nextReviewAt: expect.any(String),
+          reviewIntervalHours: expect.any(Number),
+          remainingKnowledgeGapIds: expect.any(Array)
+        })
+      );
     } finally {
       await server.close();
     }

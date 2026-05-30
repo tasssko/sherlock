@@ -232,16 +232,6 @@ async function runLoopFlow(server: Awaited<ReturnType<typeof createServer>>) {
   });
   expect(attemptResponse.statusCode).toBe(201);
 
-  const practiceResponse = await server.inject({
-    method: "POST",
-    url: `/v1/learning-loops/${assessment.learningLoop.id}/practice-activities`,
-    payload: {
-      kind: "flashcard_set",
-      cardCount: 2
-    }
-  });
-  expect(practiceResponse.statusCode).toBe(201);
-
   const studyPlanResponse = await server.inject({
     method: "POST",
     url: "/v1/study-plans",
@@ -263,10 +253,43 @@ async function runLoopFlow(server: Awaited<ReturnType<typeof createServer>>) {
   });
   expect(studyPlanResponse.statusCode).toBe(201);
 
+  const practiceResponse = await server.inject({
+    method: "POST",
+    url: `/v1/learning-loops/${assessment.learningLoop.id}/practice-activities`,
+    payload: {
+      kind: "flashcard_set",
+      cardCount: 2
+    }
+  });
+  expect(practiceResponse.statusCode).toBe(201);
+
+  const practiceListResponse = await server.inject({
+    method: "GET",
+    url: `/v1/learning-loops/${assessment.learningLoop.id}/practice-activities`
+  });
+  expect(practiceListResponse.statusCode).toBe(200);
+
+  const practiceCompletionResponse = await server.inject({
+    method: "POST",
+    url: `/v1/practice-activities/${practiceResponse.json().practiceActivity.id}/completions`,
+    payload: {
+      responses: practiceResponse.json().practiceActivity.flashcardSet.cards.map(
+        (card: { back: string; id: string }) => ({
+          practiceItemId: card.id,
+          responseText: card.back,
+          confidence: "high"
+        })
+      )
+    }
+  });
+  expect(practiceCompletionResponse.statusCode).toBe(201);
+
   return {
     assessment: assessmentResponse.json(),
     attempt: attemptResponse.json(),
     practice: practiceResponse.json(),
+    practiceList: practiceListResponse.json(),
+    completion: practiceCompletionResponse.json(),
     studyPlan: studyPlanResponse.json()
   };
 }
@@ -470,6 +493,8 @@ describe("Agent runtime contract", () => {
       expect(Object.keys(relay.assessment).sort()).toEqual(Object.keys(fixture.assessment).sort());
       expect(Object.keys(relay.attempt).sort()).toEqual(Object.keys(fixture.attempt).sort());
       expect(Object.keys(relay.practice).sort()).toEqual(Object.keys(fixture.practice).sort());
+      expect(Object.keys(relay.practiceList).sort()).toEqual(Object.keys(fixture.practiceList).sort());
+      expect(Object.keys(relay.completion).sort()).toEqual(Object.keys(fixture.completion).sort());
       expect(Object.keys(relay.studyPlan).sort()).toEqual(Object.keys(fixture.studyPlan).sort());
 
       expect(relay.assessment).toMatchObject({
@@ -488,6 +513,20 @@ describe("Agent runtime contract", () => {
         })
       });
       expect(relay.practice).toMatchObject({
+        learningLoopId: expect.any(String),
+        phase: expect.any(String),
+        nextAction: expect.objectContaining({
+          kind: expect.any(String)
+        })
+      });
+      expect(relay.practiceList).toMatchObject({
+        learningLoopId: expect.any(String),
+        phase: expect.any(String),
+        nextAction: expect.objectContaining({
+          kind: expect.any(String)
+        })
+      });
+      expect(relay.completion).toMatchObject({
         learningLoopId: expect.any(String),
         phase: expect.any(String),
         nextAction: expect.objectContaining({

@@ -69,6 +69,11 @@ textarea {
   margin: 0 auto;
 }
 
+.control-stack {
+  display: grid;
+  gap: 1.25rem;
+}
+
 .panel {
   border: 1px solid rgba(19, 35, 29, 0.14);
   background: rgba(255, 248, 237, 0.84);
@@ -83,6 +88,12 @@ textarea {
 }
 
 .panel-form form {
+  display: grid;
+  gap: 1rem;
+  padding: 1.2rem;
+}
+
+.panel-body {
   display: grid;
   gap: 1rem;
   padding: 1.2rem;
@@ -107,10 +118,27 @@ textarea {
   gap: 1.25rem;
 }
 
+.inline-grid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+}
+
 .minutes-grid {
   display: grid;
   gap: 0.75rem;
   grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+}
+
+.hint,
+.status,
+.subtle-heading {
+  margin: 0;
+  color: rgba(19, 35, 29, 0.76);
+}
+
+.hint code {
+  font-family: "SFMono-Regular", "Menlo", monospace;
 }
 
 .panel-form button {
@@ -140,6 +168,11 @@ textarea {
   padding: 1rem;
   border-left: 4px solid #b97832;
   background: rgba(255, 255, 255, 0.72);
+}
+
+.accent-card {
+  border-left-color: #233d32;
+  background: rgba(240, 247, 243, 0.78);
 }
 
 .card h3 {
@@ -184,8 +217,24 @@ textarea {
   padding: 1.2rem;
 }
 
+.status {
+  padding: 0 1.2rem 1.2rem;
+}
+
 .error {
   color: #8b1e1e;
+}
+
+.response-card {
+  padding: 1rem;
+  border: 1px solid rgba(19, 35, 29, 0.1);
+  background: rgba(255, 252, 247, 0.7);
+}
+
+.response-title {
+  margin-top: 0;
+  margin-bottom: 0.4rem;
+  font-weight: 600;
 }
 
 @media (min-width: 960px) {

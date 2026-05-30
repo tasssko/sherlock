@@ -8,6 +8,7 @@ export interface LearningLoopViewProps {
 
 export function LearningLoopView(props: LearningLoopViewProps) {
   const { knowledgeGaps, learningLoop, masteryProfile } = props;
+  const remainingPracticeCount = learningLoop.practiceActivityIds.length;
 
   return (
     <div className="card">
@@ -17,6 +18,9 @@ export function LearningLoopView(props: LearningLoopViewProps) {
       </p>
       <p>
         Assessments: {learningLoop.assessmentIds.length} · Evaluations: {learningLoop.evaluationIds.length}
+      </p>
+      <p>
+        Practice activities: {remainingPracticeCount} · Reviews: {learningLoop.activeReviewSessionIds.length}
       </p>
       <p>Knowledge Gaps</p>
       <ul>
