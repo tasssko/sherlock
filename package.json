@@ -1,0 +1,39 @@
+{
+  "name": "sherlock",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "pnpm build:server && pnpm build:admin",
+    "build:server": "tsc -p tsconfig.json",
+    "build:admin": "vite build",
+    "typecheck": "pnpm typecheck:server && pnpm typecheck:admin",
+    "typecheck:server": "tsc --noEmit -p tsconfig.json",
+    "typecheck:admin": "tsc --noEmit -p tsconfig.admin.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "dev:api": "tsx src/app/api/server.ts",
+    "dev:admin": "vite",
+    "start:api": "node dist/app/api/server.js"
+  },
+  "dependencies": {
+    "fastify": "^5.3.3",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6",
+    "zod": "^3.25.28"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.30",
+    "@types/react": "^19.2.15",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.2",
+    "tsx": "^4.20.3",
+    "typescript": "^5.8.3",
+    "vite": "^8.0.14",
+    "vitest": "^3.2.4"
+  }
+}
+

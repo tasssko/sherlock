@@ -1,0 +1,177 @@
+:root {
+  font-family: "Avenir Next", "Segoe UI", sans-serif;
+  color: #13231d;
+  background:
+    radial-gradient(circle at top left, rgba(255, 233, 188, 0.85), transparent 32rem),
+    linear-gradient(180deg, #f3ead6 0%, #efe6d0 48%, #e1d7bd 100%);
+  line-height: 1.5;
+  font-weight: 400;
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+.shell {
+  min-height: 100vh;
+  padding: 2rem 1.25rem 3rem;
+}
+
+.hero {
+  max-width: 62rem;
+  margin: 0 auto 2rem;
+  padding: 2rem;
+  border: 1px solid rgba(19, 35, 29, 0.14);
+  background: rgba(255, 250, 240, 0.72);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 1rem 3rem rgba(77, 56, 18, 0.12);
+}
+
+.eyebrow {
+  margin: 0 0 0.5rem;
+  font-size: 0.8rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #7f4f20;
+}
+
+.hero h1 {
+  margin: 0;
+  max-width: 16ch;
+  font-family: "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+  font-size: clamp(2.8rem, 6vw, 5rem);
+  line-height: 0.95;
+}
+
+.lede {
+  max-width: 42rem;
+  margin: 1rem 0 0;
+  font-size: 1.05rem;
+}
+
+.grid {
+  display: grid;
+  gap: 1.25rem;
+  max-width: 72rem;
+  margin: 0 auto;
+}
+
+.panel {
+  border: 1px solid rgba(19, 35, 29, 0.14);
+  background: rgba(255, 248, 237, 0.84);
+  box-shadow: 0 1rem 2.5rem rgba(77, 56, 18, 0.08);
+}
+
+.panel h2 {
+  margin: 0;
+  padding: 1rem 1.2rem 0;
+  font-family: "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+  font-size: 1.6rem;
+}
+
+.panel-form form {
+  display: grid;
+  gap: 1rem;
+  padding: 1.2rem;
+}
+
+.panel-form label {
+  display: grid;
+  gap: 0.35rem;
+}
+
+.panel-form input,
+.panel-form textarea {
+  width: 100%;
+  padding: 0.8rem 0.9rem;
+  border: 1px solid rgba(19, 35, 29, 0.18);
+  background: rgba(255, 255, 255, 0.75);
+}
+
+.minutes-grid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+}
+
+.panel-form button {
+  padding: 0.95rem 1.2rem;
+  border: none;
+  background: #233d32;
+  color: #f7f0e2;
+  cursor: pointer;
+}
+
+.panel-form button:disabled {
+  opacity: 0.7;
+  cursor: wait;
+}
+
+.panel-result {
+  padding-bottom: 1.2rem;
+}
+
+.result-stack {
+  display: grid;
+  gap: 1rem;
+  padding: 1.2rem;
+}
+
+.card {
+  padding: 1rem;
+  border-left: 4px solid #b97832;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.card h3 {
+  margin-top: 0;
+  margin-bottom: 0.6rem;
+}
+
+.card ul {
+  margin: 0;
+  padding-left: 1.2rem;
+}
+
+.card li + li {
+  margin-top: 0.5rem;
+}
+
+.card li span {
+  display: block;
+  margin-top: 0.2rem;
+}
+
+.placeholder,
+.error {
+  padding: 1.2rem;
+}
+
+.error {
+  color: #8b1e1e;
+}
+
+@media (min-width: 960px) {
+  .grid {
+    grid-template-columns: minmax(18rem, 26rem) 1fr;
+    align-items: start;
+  }
+
+  .panel-form {
+    position: sticky;
+    top: 1rem;
+  }
+}
+
