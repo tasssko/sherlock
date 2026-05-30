@@ -1,13 +1,11 @@
-import { agentCanUseCapability, createAgent, type Agent } from "../../domain/primitives/Agent.js";
+import { Agent } from "../../domain/primitives/Agent.js";
 import { capabilityCatalog } from "../../domain/primitives/Capability.js";
-import type { ContextAssumption } from "../../domain/primitives/Context.js";
+import type { ContextAssumption, StudyPlanningContext } from "../../domain/primitives/Context.js";
+import type { DomainEventRecorder } from "../../domain/primitives/Event.js";
+import { evaluatePolicies, policies } from "../../domain/primitives/Policy.js";
 import { err, ok, type Result } from "../../domain/primitives/result.js";
-import { policies } from "../../domain/primitives/Policy.js";
-import type {
-  StudyDay,
-  StudyPlanArtifactContent,
-  StudyPlanningContext
-} from "../../domain/study/StudyPlanning.js";
+import type { StudyPlanArtifactContent } from "../../domain/study/StudyPlanning.js";
+import type { StudyDay } from "../../domain/study/StudySchedule.js";
 
 export interface StudyPlannerOutput {
   assumptions: readonly ContextAssumption[];
@@ -17,7 +15,7 @@ export interface StudyPlannerOutput {
 }
 
 export function createStudyPlannerAgent(): Agent {
-  return createAgent({
+  return Agent.create({
     role: "study-planner",
     purpose: "Build bounded weekly study plans from learner context and time limits.",
     capabilities: [
@@ -31,18 +29,21 @@ export function createStudyPlannerAgent(): Agent {
 
 export function generateStudyPlan(
   agent: Agent,
-  context: StudyPlanningContext
+  context: StudyPlanningContext,
+  events: DomainEventRecorder
 ): Result<StudyPlannerOutput> {
-  if (!agentCanUseCapability(agent, capabilityCatalog.generateStudyPlan.id)) {
+  events.recordAgentInvoked(agent.id, agent.role);
+
+  if (!agent.canUseCapability(capabilityCatalog.generateStudyPlan.id)) {
     return err({
       code: "POLICY_VIOLATION",
       message: `Agent ${agent.id} cannot use capability ${capabilityCatalog.generateStudyPlan.id}.`
     });
   }
 
-  const activeDays = Object.entries(context.availableMinutesByDay)
-    .filter(([, minutes]) => minutes > 0)
-    .map(([day]) => day as StudyDay);
+  const activeDays = context.schedule
+    .filter((entry) => entry.minutes > 0)
+    .map((entry) => entry.day as StudyDay);
 
   if (activeDays.length === 0) {
     return err({
@@ -74,8 +75,9 @@ export function generateStudyPlan(
     }
   ];
 
+  const availableMinutesByDay = context.availableMinutesByDay();
   const sessions = activeDays.map((day, index) => {
-    const minutes = context.availableMinutesByDay[day];
+    const minutes = availableMinutesByDay[day];
     const topic = context.focusTopics[index % context.focusTopics.length] ?? fallbackTopic;
     const longSession = minutes >= 60;
 
@@ -92,33 +94,55 @@ export function generateStudyPlan(
     };
   });
 
-  const checkpoints = [
-    `Midweek check: explain one idea from ${context.focusTopics[0]} without notes.`,
-    `Weekend check: complete a mixed review covering ${context.focusTopics.join(", ")}.`
-  ];
-
-  const decisions = [
-    "Allocated one primary topic to each active study day.",
-    "Used longer sessions for consolidation and mixed review.",
-    "Kept every session outcome explicit so the learner can judge completion."
-  ];
-
-  return ok({
+  const output: StudyPlannerOutput = {
     assumptions,
-    decisions,
+    decisions: [
+      "Allocated one primary topic to each active study day.",
+      "Used longer sessions for consolidation and mixed review.",
+      "Kept every session outcome explicit so the learner can judge completion.",
+      ...(context.diagnosedGaps.length > 0
+        ? [`Prioritised diagnosed gaps in ${context.diagnosedGaps.join(", ")}.`]
+        : [])
+    ],
     childTaskSummaries: context.focusTopics.map(
       (topic) => `Prepare a focused ${topic} study block with retrieval and self-check.`
     ),
     artifactContent: {
-      summary: `${context.learnerName} will follow a one-week plan focused on ${context.focusTopics.join(
-        ", "
-      )}.`,
+      summary:
+        context.diagnosedGaps.length > 0
+          ? `${context.learnerName} will follow a one-week plan focused on closing gaps in ${context.diagnosedGaps.join(
+              ", "
+            )} and reinforcing ${context.focusTopics.join(", ")}.`
+          : `${context.learnerName} will follow a one-week plan focused on ${context.focusTopics.join(
+              ", "
+            )}.`,
       sessions,
-      checkpoints,
+      checkpoints: [
+        `Midweek check: explain one idea from ${fallbackTopic} without notes.`,
+        `Weekend check: complete a mixed review covering ${context.focusTopics.join(", ")}.`
+      ],
       notes: [
         "Keep materials ready before each session to protect the short weekday slots.",
-        "If a session is missed, roll it into Saturday before starting new work."
+        "If a session is missed, roll it into Saturday before starting new work.",
+        ...(context.diagnosedGaps.length > 0
+          ? [`Start each session by revisiting the diagnosed gap in ${context.diagnosedGaps[0]}.`]
+          : [])
       ]
     }
-  });
+  };
+
+  const policyEvaluation = evaluatePolicies(
+    agent.policies,
+    {
+      kind: "study-plan",
+      context,
+      artifactContent: output.artifactContent
+    },
+    events
+  );
+  if (!policyEvaluation.ok) {
+    return policyEvaluation;
+  }
+
+  return ok(output);
 }

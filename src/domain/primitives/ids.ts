@@ -4,7 +4,15 @@ export type Brand<TValue, TBrand extends string> = TValue & {
 
 export type AgentId = Brand<string, "AgentId">;
 export type ArtifactId = Brand<string, "ArtifactId">;
+export type AssessmentId = Brand<string, "AssessmentId">;
+export type AttemptId = Brand<string, "AttemptId">;
 export type EventId = Brand<string, "EventId">;
+export type EvaluationId = Brand<string, "EvaluationId">;
+export type KnowledgeGapId = Brand<string, "KnowledgeGapId">;
+export type LearningLoopId = Brand<string, "LearningLoopId">;
+export type MasterDataItemId = Brand<string, "MasterDataItemId">;
+export type MasterDataSourceId = Brand<string, "MasterDataSourceId">;
+export type MasteryProfileId = Brand<string, "MasteryProfileId">;
 export type TaskId = Brand<string, "TaskId">;
 export type WorkPlanId = Brand<string, "WorkPlanId">;
 export type WorkspaceId = Brand<string, "WorkspaceId">;
@@ -25,8 +33,40 @@ export function createArtifactId(): ArtifactId {
   return createId("artifact") as ArtifactId;
 }
 
+export function createAssessmentId(): AssessmentId {
+  return createId("assessment") as AssessmentId;
+}
+
+export function createAttemptId(): AttemptId {
+  return createId("attempt") as AttemptId;
+}
+
 export function createEventId(): EventId {
   return createId("event") as EventId;
+}
+
+export function createEvaluationId(): EvaluationId {
+  return createId("evaluation") as EvaluationId;
+}
+
+export function createKnowledgeGapId(): KnowledgeGapId {
+  return createId("gap") as KnowledgeGapId;
+}
+
+export function createLearningLoopId(): LearningLoopId {
+  return createId("loop") as LearningLoopId;
+}
+
+export function createMasterDataItemId(): MasterDataItemId {
+  return createId("master_item") as MasterDataItemId;
+}
+
+export function createMasterDataSourceId(): MasterDataSourceId {
+  return createId("master_source") as MasterDataSourceId;
+}
+
+export function createMasteryProfileId(): MasteryProfileId {
+  return createId("mastery") as MasteryProfileId;
 }
 
 export function createTaskId(): TaskId {
@@ -40,4 +80,3 @@ export function createWorkPlanId(): WorkPlanId {
 export function createWorkspaceId(): WorkspaceId {
   return createId("workspace") as WorkspaceId;
 }
-

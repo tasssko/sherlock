@@ -12,8 +12,20 @@ Principles:
 The current screen intentionally exposes:
 
 - workspace metadata
-- task list
+- learning loop metadata
+- task graph nodes and dependencies
 - work plan stages
 - study-plan artifact sessions
+- diagnosed knowledge gaps and mastery state
 - event trail
 
+Current UI split:
+
+- study-plan request form
+- API adapters
+- workspace snapshot view
+- learning loop view
+- task graph view
+- work plan view
+- study-plan artifact view
+- event timeline

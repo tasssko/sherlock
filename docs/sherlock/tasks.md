@@ -16,7 +16,7 @@ Key behaviour:
 - invalid transitions are rejected
 - a task cannot enter `ready` or `completed` if required dependencies are incomplete
 - parent and child lineage is recorded separately from dependency edges
+- the parent study-plan task depends on completion of the child topic tasks
 - `TaskGraph` validates that referenced parents and dependencies exist
 
 The first vertical slice creates one parent planning task and one child task per study topic.
-

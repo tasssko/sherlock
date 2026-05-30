@@ -6,5 +6,4 @@ Sherlock is built around explicit primitives such as `Task`, `TaskGraph`, `WorkP
 
 ## Rationale
 
-The application should evolve from durable concepts rather than route-level helpers or generic services. This keeps behaviour testable and supports future expansion into a larger agentic education system.
-
+The application should evolve from durable concepts rather than route-level helpers or generic services. Workspace attachment, work-plan mutation, artifact provenance, policy evaluation, and task transitions now live behind primitive methods so behaviour stays testable and supports future expansion into a larger agentic education system.

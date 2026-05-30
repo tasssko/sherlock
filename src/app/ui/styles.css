@@ -20,6 +20,7 @@ body {
 
 button,
 input,
+select,
 textarea {
   font: inherit;
 }
@@ -93,11 +94,17 @@ textarea {
 }
 
 .panel-form input,
+.panel-form select,
 .panel-form textarea {
   width: 100%;
   padding: 0.8rem 0.9rem;
   border: 1px solid rgba(19, 35, 29, 0.18);
   background: rgba(255, 255, 255, 0.75);
+}
+
+.form-stack {
+  display: grid;
+  gap: 1.25rem;
 }
 
 .minutes-grid {
@@ -154,6 +161,24 @@ textarea {
   margin-top: 0.2rem;
 }
 
+.graph-list,
+.timeline-list {
+  list-style: none;
+  padding-left: 0;
+}
+
+.graph-list li,
+.timeline-list li {
+  padding: 0.75rem 0;
+  border-top: 1px solid rgba(19, 35, 29, 0.12);
+}
+
+.graph-list li:first-child,
+.timeline-list li:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+
 .placeholder,
 .error {
   padding: 1.2rem;
@@ -174,4 +199,3 @@ textarea {
     top: 1rem;
   }
 }
-

@@ -7,16 +7,16 @@
     "node": ">=22"
   },
   "scripts": {
-    "build": "pnpm build:server && pnpm build:admin",
+    "build": "pnpm build:server && pnpm build:frontend",
     "build:server": "tsc -p tsconfig.json",
-    "build:admin": "vite build",
-    "typecheck": "pnpm typecheck:server && pnpm typecheck:admin",
+    "build:frontend": "vite build",
+    "typecheck": "pnpm typecheck:server && pnpm typecheck:frontend",
     "typecheck:server": "tsc --noEmit -p tsconfig.json",
-    "typecheck:admin": "tsc --noEmit -p tsconfig.admin.json",
+    "typecheck:frontend": "tsc --noEmit -p tsconfig.frontend.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "dev:api": "tsx src/app/api/server.ts",
-    "dev:admin": "vite",
+    "dev:frontend": "vite",
     "start:api": "node dist/app/api/server.js"
   },
   "dependencies": {
@@ -36,4 +36,3 @@
     "vitest": "^3.2.4"
   }
 }
-

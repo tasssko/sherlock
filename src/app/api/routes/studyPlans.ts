@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
-import { StudyPlanController, mapDomainErrorToHttpStatus } from "../../../modules/planning/StudyPlanController.js";
+import { StudyPlanController } from "../../../modules/planning/StudyPlanController.js";
+import { mapDomainErrorToHttpStatus } from "../http/domainErrors.js";
 
 const createStudyPlanSchema = z.object({
   learnerName: z.string().min(1),
@@ -46,4 +47,3 @@ export async function registerStudyPlanRoutes(
     return reply.code(201).send(result.value);
   });
 }
-

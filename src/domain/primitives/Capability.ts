@@ -3,13 +3,25 @@ export const capabilityCatalog = {
     id: "artifact.create",
     description: "Create typed artifacts linked to tasks and provenance."
   },
+  evaluateAttempt: {
+    id: "attempt.evaluate",
+    description: "Evaluate submitted assessment answers and identify knowledge gaps."
+  },
   createChildTask: {
     id: "task.create-child",
     description: "Create child tasks under a parent task."
   },
+  generateAssessment: {
+    id: "assessment.generate",
+    description: "Generate an initial diagnostic assessment from master data."
+  },
   generateStudyPlan: {
     id: "study-plan.generate",
     description: "Generate a structured weekly study plan artifact."
+  },
+  uploadMasterData: {
+    id: "master-data.upload",
+    description: "Register uploaded master data for learning-loop assessment generation."
   }
 } as const;
 
@@ -22,4 +34,3 @@ export interface Capability {
 }
 
 export const capabilities: readonly Capability[] = Object.values(capabilityCatalog);
-

@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { StudyPlanController } from "../src/modules/planning/StudyPlanController.js";
-import { studyDays } from "../src/domain/study/StudyPlanning.js";
+import { SqliteStudyPlanRepository } from "../src/modules/planning/StudyPlanRepository.js";
+import { studyDays } from "../src/domain/study/StudySchedule.js";
 
 describe("StudyPlanController", () => {
-  it("returns a structured workspace snapshot", () => {
-    const controller = new StudyPlanController();
+  it("returns a structured workspace snapshot with ordered lifecycle events", () => {
+    const controller = new StudyPlanController(new SqliteStudyPlanRepository(":memory:"));
     const result = controller.execute({
       learnerName: "Year 7 learner",
       yearGroup: "Year 7",
@@ -20,10 +21,43 @@ describe("StudyPlanController", () => {
       return;
     }
 
-    expect(result.value.tasks.length).toBe(4);
-    expect(result.value.workPlan.stages.length).toBe(3);
-    expect(result.value.artifact.type).toBe("study-plan");
-    expect(result.value.artifact.content.sessions.length).toBe(6);
-    expect(result.value.events.some((event) => event.type === "artifact.generated")).toBe(true);
+    const parentTask = result.value.tasks.find((task) => task.parentTaskId === undefined);
+    const childTasks = result.value.tasks.filter((task) => task.parentTaskId !== undefined);
+
+    expect(parentTask).toBeDefined();
+    expect(childTasks).toHaveLength(3);
+    expect(parentTask?.childTaskIds).toHaveLength(3);
+    expect(parentTask?.dependencies).toEqual(childTasks.map((task) => task.id));
+    expect(childTasks.every((task) => task.parentTaskId === parentTask?.id)).toBe(true);
+    expect(result.value.artifact.provenance.controller).toBe("StudyPlanController");
+    expect(result.value.artifact.provenance.assumptions).toHaveLength(3);
+    expect(result.value.workPlan.assumptions).toHaveLength(3);
+    expect(result.value.workspace.eventIds).toHaveLength(result.value.events.length);
+    expect(result.value.blockedTaskIds).toHaveLength(0);
+    expect(result.value.learningLoop.topic).toBe("fractions");
+    expect(result.value.learningLoop.workPlanIds).toContain(result.value.workPlan.id);
+    expect(result.value.learningLoop.artifactIds).toContain(result.value.artifact.id);
+    expect(result.value.events.every((event) => event.workspaceId === result.value.workspace.id)).toBe(
+      true
+    );
+
+    const eventTypes = result.value.events.map((event) => event.type);
+    expect(eventTypes.indexOf("work-plan.created")).toBeLessThan(
+      eventTypes.indexOf("work-plan.assumption-recorded")
+    );
+    expect(eventTypes.indexOf("artifact.generated")).toBeLessThan(
+      eventTypes.indexOf("workspace.artifact-attached")
+    );
+    expect(eventTypes.indexOf("learning-loop.work-plan-attached")).toBeGreaterThan(
+      eventTypes.indexOf("work-plan.created")
+    );
+    const artifactGeneratedEvent = result.value.events.find(
+      (event) => event.type === "artifact.generated"
+    );
+    expect(artifactGeneratedEvent?.payload).toMatchObject({
+      artifactId: result.value.artifact.id,
+      taskId: parentTask?.id,
+      version: 1
+    });
   });
 });

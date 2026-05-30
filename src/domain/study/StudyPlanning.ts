@@ -1,24 +1,17 @@
-import type { Agent } from "../primitives/Agent.js";
-import type { Artifact } from "../primitives/Artifact.js";
-import type { OperationContext } from "../primitives/Context.js";
+import type {
+  KnowledgeGapSnapshot,
+  LearningLoopSnapshot,
+  MasteryProfileSnapshot
+} from "../learning/LearningLoop.js";
+import type { AgentSnapshot } from "../primitives/Agent.js";
+import type { ArtifactSnapshot } from "../primitives/Artifact.js";
 import type { DomainEvent } from "../primitives/Event.js";
-import type { TaskGraph } from "../primitives/TaskGraph.js";
-import type { Task } from "../primitives/Task.js";
-import type { WorkPlan } from "../primitives/WorkPlan.js";
-import type { Workspace } from "../primitives/Workspace.js";
+import type { TaskGraphSnapshot } from "../primitives/TaskGraph.js";
+import type { TaskSnapshot } from "../primitives/Task.js";
+import type { WorkPlanSnapshot } from "../primitives/WorkPlan.js";
+import type { WorkspaceSnapshot } from "../primitives/Workspace.js";
 import type { TaskId } from "../primitives/ids.js";
-
-export const studyDays = [
-  "Monday",
-  "Tuesday",
-  "Wednesday",
-  "Thursday",
-  "Friday",
-  "Saturday",
-  "Sunday"
-] as const;
-
-export type StudyDay = (typeof studyDays)[number];
+import type { StudyDay } from "./StudySchedule.js";
 
 export interface CreateStudyPlanCommand {
   learnerName: string;
@@ -44,23 +37,16 @@ export interface StudyPlanArtifactContent {
   notes: readonly string[];
 }
 
-export interface StudyPlanningContext
-  extends OperationContext<"learner" | "objective" | "schedule" | "topics"> {
-  learnerName: string;
-  yearGroup: string;
-  objective: string;
-  focusTopics: readonly string[];
-  availableMinutesByDay: Record<StudyDay, number>;
-}
-
 export interface StudyPlanResponse {
-  workspace: Workspace;
-  agent: Agent;
-  tasks: readonly Task[];
-  taskGraph: TaskGraph;
+  workspace: WorkspaceSnapshot;
+  learningLoop: LearningLoopSnapshot;
+  agent: AgentSnapshot;
+  tasks: readonly TaskSnapshot[];
+  taskGraph: TaskGraphSnapshot;
   blockedTaskIds: readonly TaskId[];
-  workPlan: WorkPlan;
-  artifact: Artifact<StudyPlanArtifactContent, "study-plan">;
+  workPlan: WorkPlanSnapshot;
+  artifact: ArtifactSnapshot<StudyPlanArtifactContent, "study-plan">;
+  knowledgeGaps: readonly KnowledgeGapSnapshot[];
+  masteryProfile?: MasteryProfileSnapshot;
   events: readonly DomainEvent[];
 }
-

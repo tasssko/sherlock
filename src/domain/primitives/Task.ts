@@ -1,6 +1,7 @@
 import type { ArtifactId } from "./ids.js";
 import type { TaskId, WorkspaceId } from "./ids.js";
 import { createTaskId } from "./ids.js";
+import type { DomainEventRecorder } from "./Event.js";
 import { err, ok, type Result } from "./result.js";
 
 export type TaskState =
@@ -13,7 +14,7 @@ export type TaskState =
   | "ready"
   | "running";
 
-export type TaskKind = "study-plan" | "topic-plan";
+export type TaskKind = "assessment" | "study-plan" | "topic-plan";
 
 export interface TaskInput {
   objective: string;
@@ -26,7 +27,7 @@ export interface TaskOutput {
   summary: string;
 }
 
-export interface Task {
+export interface TaskSnapshot {
   id: TaskId;
   workspaceId: WorkspaceId;
   title: string;
@@ -63,73 +64,177 @@ const allowedTransitions: Record<TaskState, readonly TaskState[]> = {
   running: ["blocked", "completed", "failed"]
 };
 
-export function createTask(input: CreateTaskInput): Task {
-  const now = new Date().toISOString();
+export class Task {
+  private constructor(private readonly snapshot: TaskSnapshot) {}
 
-  return {
-    id: createTaskId(),
-    workspaceId: input.workspaceId,
-    title: input.title,
-    kind: input.kind,
-    state: input.state ?? "created",
-    parentTaskId: input.parentTaskId,
-    childTaskIds: input.childTaskIds ?? [],
-    dependencies: input.dependencies ?? [],
-    input: input.input,
-    createdAt: now,
-    updatedAt: now
-  };
-}
-
-export function withTaskChildren(task: Task, childTaskIds: readonly TaskId[]): Task {
-  return {
-    ...task,
-    childTaskIds,
-    updatedAt: new Date().toISOString()
-  };
-}
-
-export function withTaskOutput(task: Task, output: TaskOutput): Task {
-  return {
-    ...task,
-    output,
-    updatedAt: new Date().toISOString()
-  };
-}
-
-export function transitionTask(
-  task: Task,
-  nextState: TaskState,
-  completedDependencyIds: ReadonlySet<TaskId>
-): Result<Task> {
-  if (task.state === nextState) {
-    return ok(task);
-  }
-
-  if (!allowedTransitions[task.state].includes(nextState)) {
-    return err({
-      code: "STATE_CONFLICT",
-      message: `Task ${task.id} cannot transition from ${task.state} to ${nextState}.`
+  static rehydrate(snapshot: TaskSnapshot): Task {
+    return new Task({
+      ...snapshot,
+      childTaskIds: [...snapshot.childTaskIds],
+      dependencies: [...snapshot.dependencies],
+      input: {
+        ...snapshot.input,
+        facts: [...snapshot.input.facts]
+      },
+      output: snapshot.output
+        ? {
+            ...snapshot.output,
+            artifactIds: [...snapshot.output.artifactIds]
+          }
+        : undefined
     });
   }
 
-  if ((nextState === "ready" || nextState === "completed") && task.dependencies.length > 0) {
-    const unresolved = task.dependencies.find(
-      (dependencyId) => !completedDependencyIds.has(dependencyId)
-    );
+  static create(input: CreateTaskInput, events: DomainEventRecorder): Task {
+    events.assertWorkspace(input.workspaceId);
+    const now = new Date().toISOString();
+    const task = new Task({
+      id: createTaskId(),
+      workspaceId: input.workspaceId,
+      title: input.title,
+      kind: input.kind,
+      state: input.state ?? "created",
+      parentTaskId: input.parentTaskId,
+      childTaskIds: input.childTaskIds ?? [],
+      dependencies: input.dependencies ?? [],
+      input: input.input,
+      createdAt: now,
+      updatedAt: now
+    });
 
-    if (unresolved) {
-      return err({
-        code: "STATE_CONFLICT",
-        message: `Task ${task.id} cannot enter ${nextState} while dependency ${unresolved} is incomplete.`
-      });
-    }
+    events.recordTaskCreated(task.id, task.title, task.state);
+
+    return task;
   }
 
-  return ok({
-    ...task,
-    state: nextState,
-    updatedAt: new Date().toISOString()
-  });
-}
+  get id(): TaskId {
+    return this.snapshot.id;
+  }
 
+  get workspaceId(): WorkspaceId {
+    return this.snapshot.workspaceId;
+  }
+
+  get title(): string {
+    return this.snapshot.title;
+  }
+
+  get state(): TaskState {
+    return this.snapshot.state;
+  }
+
+  get parentTaskId(): TaskId | undefined {
+    return this.snapshot.parentTaskId;
+  }
+
+  get childTaskIds(): readonly TaskId[] {
+    return this.snapshot.childTaskIds;
+  }
+
+  get dependencies(): readonly TaskId[] {
+    return this.snapshot.dependencies;
+  }
+
+  plan(events: DomainEventRecorder): Result<Task> {
+    return this.transitionTo("planned", new Set(), events);
+  }
+
+  markReady(completedDependencyIds: ReadonlySet<TaskId>, events: DomainEventRecorder): Result<Task> {
+    return this.transitionTo("ready", completedDependencyIds, events);
+  }
+
+  start(events: DomainEventRecorder): Result<Task> {
+    return this.transitionTo("running", new Set(this.snapshot.dependencies), events);
+  }
+
+  complete(
+    output: TaskOutput,
+    completedDependencyIds: ReadonlySet<TaskId>,
+    events: DomainEventRecorder
+  ): Result<Task> {
+    const withOutput = new Task({
+      ...this.snapshot,
+      output: {
+        artifactIds: [...output.artifactIds],
+        summary: output.summary
+      },
+      updatedAt: new Date().toISOString()
+    });
+
+    return withOutput.transitionTo("completed", completedDependencyIds, events);
+  }
+
+  attachChildren(childTaskIds: readonly TaskId[]): Task {
+    return new Task({
+      ...this.snapshot,
+      childTaskIds: [...childTaskIds],
+      updatedAt: new Date().toISOString()
+    });
+  }
+
+  dependOn(taskIds: readonly TaskId[]): Task {
+    return new Task({
+      ...this.snapshot,
+      dependencies: [...taskIds],
+      updatedAt: new Date().toISOString()
+    });
+  }
+
+  toSnapshot(): TaskSnapshot {
+    return {
+      ...this.snapshot,
+      childTaskIds: [...this.snapshot.childTaskIds],
+      dependencies: [...this.snapshot.dependencies],
+      input: {
+        ...this.snapshot.input,
+        facts: [...this.snapshot.input.facts]
+      },
+      output: this.snapshot.output
+        ? {
+            ...this.snapshot.output,
+            artifactIds: [...this.snapshot.output.artifactIds]
+          }
+        : undefined
+    };
+  }
+
+  private transitionTo(
+    nextState: TaskState,
+    completedDependencyIds: ReadonlySet<TaskId>,
+    events: DomainEventRecorder
+  ): Result<Task> {
+    if (this.snapshot.state === nextState) {
+      return ok(this);
+    }
+
+    if (!allowedTransitions[this.snapshot.state].includes(nextState)) {
+      return err({
+        code: "STATE_CONFLICT",
+        message: `Task ${this.snapshot.id} cannot transition from ${this.snapshot.state} to ${nextState}.`
+      });
+    }
+
+    if ((nextState === "ready" || nextState === "completed") && this.snapshot.dependencies.length > 0) {
+      const unresolved = this.snapshot.dependencies.find(
+        (dependencyId) => !completedDependencyIds.has(dependencyId)
+      );
+
+      if (unresolved) {
+        return err({
+          code: "STATE_CONFLICT",
+          message: `Task ${this.snapshot.id} cannot enter ${nextState} while dependency ${unresolved} is incomplete.`
+        });
+      }
+    }
+
+    const nextTask = new Task({
+      ...this.snapshot,
+      state: nextState,
+      updatedAt: new Date().toISOString()
+    });
+
+    events.recordTaskStateChanged(this.snapshot.id, this.snapshot.state, nextState);
+
+    return ok(nextTask);
+  }
+}

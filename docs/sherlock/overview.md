@@ -2,15 +2,14 @@
 
 Sherlock is the study-planning and tutoring application within the wider StackTrack ecosystem.
 
-The first implementation target is intentionally narrow:
+The current implementation targets are intentionally narrow:
 
-1. Accept a structured request for a learner's weekly study plan.
-2. Create a workspace-level planning task and child topic tasks.
-3. Build a typed work plan.
-4. Invoke a bounded study planner agent.
-5. Produce a typed study-plan artifact.
-6. Emit an event trail.
-7. Return a structured snapshot to the frontend.
+1. Upload approved master data for later learning-loop use.
+2. Generate an initial diagnostic assessment for one topic.
+3. Record learner attempts and evaluate them.
+4. Identify knowledge gaps and update mastery tracking.
+5. Create a personalised study plan that attaches to the same learning loop.
+6. Emit an event trail across the loop stages.
+7. Return structured snapshots to the frontend.
 
 This foundation is designed to grow without reworking the core model every time a new education feature is added.
-

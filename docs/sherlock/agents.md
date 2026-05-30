@@ -14,5 +14,5 @@ Assigned policies:
 - `curriculum-alignment`
 - `no-direct-answer`
 
-The agent does not mutate storage directly. It returns structured planning output to the controller, which remains responsible for task updates, artifact creation, and event emission.
-
+The agent does not mutate storage directly. It returns structured planning output to the workflow, which remains responsible for task updates, artifact creation, and workspace attachment.
+Policy evaluation runs as executable behaviour during plan generation rather than as descriptive metadata alone.

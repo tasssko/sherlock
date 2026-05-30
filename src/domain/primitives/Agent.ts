@@ -9,7 +9,7 @@ export type AgentRole =
   | "study-planner"
   | "tutor";
 
-export interface Agent {
+export interface AgentSnapshot {
   id: AgentId;
   role: AgentRole;
   purpose: string;
@@ -24,17 +24,40 @@ export interface CreateAgentInput {
   policies: readonly PolicyId[];
 }
 
-export function createAgent(input: CreateAgentInput): Agent {
-  return {
-    id: createAgentId(),
-    role: input.role,
-    purpose: input.purpose,
-    capabilities: input.capabilities,
-    policies: input.policies
-  };
-}
+export class Agent {
+  private constructor(private readonly snapshot: AgentSnapshot) {}
 
-export function agentCanUseCapability(agent: Agent, capabilityId: CapabilityId): boolean {
-  return agent.capabilities.includes(capabilityId);
-}
+  static create(input: CreateAgentInput): Agent {
+    return new Agent({
+      id: createAgentId(),
+      role: input.role,
+      purpose: input.purpose,
+      capabilities: [...input.capabilities],
+      policies: [...input.policies]
+    });
+  }
 
+  get id(): AgentId {
+    return this.snapshot.id;
+  }
+
+  get role(): AgentRole {
+    return this.snapshot.role;
+  }
+
+  get policies(): readonly PolicyId[] {
+    return this.snapshot.policies;
+  }
+
+  canUseCapability(capabilityId: CapabilityId): boolean {
+    return this.snapshot.capabilities.includes(capabilityId);
+  }
+
+  toSnapshot(): AgentSnapshot {
+    return {
+      ...this.snapshot,
+      capabilities: [...this.snapshot.capabilities],
+      policies: [...this.snapshot.policies]
+    };
+  }
+}

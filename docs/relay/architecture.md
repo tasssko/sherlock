@@ -7,7 +7,7 @@ Observed Relay characteristics:
 - single-package repository rather than workspace tooling
 - TypeScript as the primary modelling layer
 - Fastify for the API entrypoint
-- Vite for the admin or frontend surface
+- Vite for the frontend surface
 - Vitest for tests
 - `src/app`, `src/domain`, and module-oriented source layout
 
@@ -28,4 +28,3 @@ docs/
 ```
 
 The goal is alignment, not literal duplication. Sherlock introduces study-planning primitives while preserving the same boring stack and transport boundaries.
-
