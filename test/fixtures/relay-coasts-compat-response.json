@@ -1,0 +1,58 @@
+{
+  "sourceId": "upload:year-7-geography-coasts",
+  "sourceName": "Year 7 Geography: Coasts",
+  "learnerYearGroup": "Year 7",
+  "topic": "Coasts",
+  "summary": "Coasts explains where land meets the sea, how erosion, weathering, transportation, longshore drift and deposition shape shorelines, and how coastal defences reduce risk to people and places.",
+  "learningObjectives": [
+    "Explain how erosion, weathering, transportation and deposition shape coastlines.",
+    "Describe how longshore drift moves material along the coast.",
+    "Compare hard engineering and soft engineering coastal defences."
+  ],
+  "keyConcepts": [
+    "Erosion",
+    "Weathering",
+    "Transportation",
+    "Longshore Drift",
+    "Deposition",
+    "Coastal Landforms",
+    "Coastal Defences"
+  ],
+  "mustKnow": [
+    "Hydraulic action, abrasion, attrition and corrosion are four types of erosion.",
+    "Longshore drift moves material in a zig-zag pattern along the coast.",
+    "Hard engineering includes sea walls, groynes, rock armour and gabions.",
+    "Soft engineering includes beach nourishment and dune regeneration."
+  ],
+  "vocabulary": [
+    "erosion",
+    "weathering",
+    "transportation",
+    "deposition",
+    "longshore drift",
+    "hard engineering",
+    "soft engineering"
+  ],
+  "practiceQuestions": [
+    "How does longshore drift move material along the coast?",
+    "What is the difference between hard engineering and soft engineering?"
+  ],
+  "commonMistakes": [
+    "Mixing up erosion and weathering.",
+    "Forgetting that weathering breaks rock down without movement.",
+    "Assuming groynes only help and never increase erosion elsewhere."
+  ],
+  "caseStudy": "Groynes trap sand to build beaches, but they can increase erosion further along the coast.",
+  "recommendedNextSteps": [
+    "Revise the four types of erosion and the stages of longshore drift.",
+    "Practise comparing hard and soft engineering methods."
+  ],
+  "estimatedStudyTime": "25-35 minutes",
+  "tags": [
+    "Geography",
+    "Year 7",
+    "Coasts",
+    "Erosion",
+    "Coastal Defences"
+  ]
+}

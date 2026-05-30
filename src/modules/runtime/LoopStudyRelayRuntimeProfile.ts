@@ -1,6 +1,7 @@
 export type LoopStudyRelayCapability =
   | "evaluateActiveReviewSession"
   | "evaluateAssessmentAttempt"
+  | "interpretMasterData"
   | "generateInitialAssessment"
   | "generatePracticeActivity"
   | "generateStudyPlan";
@@ -37,6 +38,7 @@ export interface LoopStudyRelayRuntimeProfile {
 }
 
 const loopStudyCapabilityNames: readonly LoopStudyRelayCapability[] = [
+  "interpretMasterData",
   "generateInitialAssessment",
   "evaluateAssessmentAttempt",
   "evaluateActiveReviewSession",
@@ -52,34 +54,36 @@ export const defaultLoopStudyRelayRuntimeProfile: LoopStudyRelayRuntimeProfile =
       name: "Study Advisor Workspace",
       slug: "study-advisor-workspace"
     },
-    defaultAgentHandle: "supervisor",
-    defaultControllerId: "controller.supervisor_workplan",
+    defaultAgentHandle: "tutor",
     capabilityRoutes: {
+      interpretMasterData: {
+        agentHandle: "tutor"
+      },
       generateInitialAssessment: {
-        agentHandle: "supervisor"
+        agentHandle: "tutor"
       },
       evaluateAssessmentAttempt: {
-        agentHandle: "supervisor"
+        agentHandle: "tutor"
       },
       evaluateActiveReviewSession: {
-        agentHandle: "supervisor"
+        agentHandle: "tutor"
       },
       generateStudyPlan: {
-        agentHandle: "supervisor"
+        agentHandle: "tutor"
       },
       generatePracticeActivity: {
-        agentHandle: "supervisor"
+        agentHandle: "tutor"
       }
     },
-    requiredAgentHandles: ["supervisor"],
-    requiredControllerIds: ["controller.supervisor_workplan"],
+    requiredAgentHandles: ["tutor"],
+    requiredControllerIds: [],
     requiredSkillIds: [],
     operatingInstructions: [],
     defaultPolicy: {
       requireApprovalForSideEffects: [],
       allowTaskCreationFromConversation: true,
       allowMessageOnlyResponses: true,
-      allowSupervisorDelegation: true,
+      allowSupervisorDelegation: false,
       allowAgentToAgentDelegation: false
     }
   });
@@ -245,6 +249,15 @@ export function withLegacyRelayCompatibilityOverrides(
     defaultControllerId: nextDefaultControllerId,
     capabilityRoutes: {
       ...profile.capabilityRoutes,
+      interpretMasterData: {
+        ...profile.capabilityRoutes.interpretMasterData,
+        agentHandle:
+          normalizeOptionalValue(overrides.assessmentAgentHandle) ??
+          (profile.capabilityRoutes.interpretMasterData.agentHandle ===
+          profile.defaultAgentHandle
+            ? nextDefaultAgentHandle
+            : profile.capabilityRoutes.interpretMasterData.agentHandle)
+      },
       generateInitialAssessment: {
         ...profile.capabilityRoutes.generateInitialAssessment,
         agentHandle:

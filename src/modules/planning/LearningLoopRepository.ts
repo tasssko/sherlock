@@ -69,6 +69,7 @@ export interface LearningLoopRepository {
     source: MasterDataSource;
     items: readonly MasterDataItem[];
   }[];
+  findMasterDataSourcesByIds(sourceIds: readonly string[]): readonly MasterDataSource[];
   findRecord(key: LearnerWorkspaceKey): LearningLoopRecord | undefined;
   findRecordByAssessmentId(assessmentId: AssessmentId): LocatedLearningLoopRecord | undefined;
   findRecordByLearningLoopId(learningLoopId: LearningLoopId): LocatedLearningLoopRecord | undefined;

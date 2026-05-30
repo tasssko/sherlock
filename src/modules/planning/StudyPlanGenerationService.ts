@@ -18,10 +18,12 @@ import type { AgentRuntime } from "../runtime/AgentRuntime.js";
 import { FixtureAgentRuntime } from "../runtime/FixtureAgentRuntime.js";
 import { appendSucceededRuntimeTrace } from "../runtime/RuntimeTraceLedger.js";
 import type { RuntimeConversationBinding } from "../runtime/RuntimeConversationBinding.js";
+import type { MasterDataInterpretationCandidate } from "../masterData/MasterDataInterpretation.js";
 
 export interface GenerateStudyPlanInput {
   command: CreateStudyPlanCommand;
   existingRecord?: LearningLoopRecord;
+  materialInterpretations?: readonly MasterDataInterpretationCandidate[];
 }
 
 export class StudyPlanGenerationService {
@@ -92,6 +94,7 @@ export class StudyPlanGenerationService {
     const generated = await this.runtime.generateStudyPlan({
       context,
       learningLoopId: learningLoop.id,
+      materialInterpretations: input.materialInterpretations,
       runtimeConversationBinding: input.existingRecord?.runtimeConversationBindings.find(
         (binding) => binding.learningLoopId === learningLoop.id
       )

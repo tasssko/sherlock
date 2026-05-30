@@ -10,6 +10,7 @@ import {
 interface RelayMessageCreateResponse {
   conversationId?: string;
   messageId?: string;
+  responseContent?: unknown;
   responseMessageId?: string;
   responseText?: string;
   taskId?: string;
@@ -26,6 +27,7 @@ interface RelayMessageInspectionResponse {
   message?: {
     id?: string;
   };
+  responseContent?: unknown;
   responseText?: string;
   resultEvents?: {
     artifactId?: string;
@@ -48,7 +50,17 @@ export interface RelayMessageCorrelation {
 export interface RelayConversationTurnResult {
   binding: RuntimeConversationBinding;
   correlation: RelayMessageCorrelation;
-  responseText: string;
+  responseContent?: unknown;
+  responseText?: string;
+}
+
+interface RelayCommandContent {
+  expectedOutputSchema: string;
+  input: unknown;
+  inputSchema: string;
+  name: string;
+  previewText?: string;
+  type: "command";
 }
 
 interface RelayApiErrorPayload {
@@ -83,34 +95,30 @@ export class LoopStudyRelayConversationAdapter {
 
   async sendStructuredTurn(input: {
     capability: LoopStudyRelayCapability;
-    expectedOutputSchema: string;
     idempotencyKey: string;
     learningLoopId: LearningLoopId;
-    messageText: string;
     metadata: {
       operation: string;
       stage: string;
     };
+    relayCommand: RelayCommandContent;
     runtimeConversationBinding?: RuntimeConversationBinding;
   }): Promise<Result<RelayConversationTurnResult>> {
     const route = this.options.binding.routeFor(input.capability);
     const response = await this.postJson<RelayMessageCreateResponse>("/v1/messages", {
       workspaceId: this.options.binding.workspaceId,
       conversationId: input.runtimeConversationBinding?.relayConversationId,
-      to: route.agentHandle,
+      to: normalizeRelayRecipient(route.agentHandle),
       source: "api",
       senderId: this.senderId,
       createdBy: this.createdBy,
-      content: {
-        type: "text",
-        text: input.messageText
-      },
+      content: input.relayCommand,
       metadata: {
         product: "loop.study",
         learningLoopId: input.learningLoopId,
         stage: input.metadata.stage,
         operation: input.metadata.operation,
-        expectedOutputSchema: input.expectedOutputSchema,
+        expectedOutputSchema: input.relayCommand.expectedOutputSchema,
         idempotencyKey: input.idempotencyKey,
         controllerId: route.controllerId ?? this.options.binding.controllerId,
         requiredSkillIds: route.requiredSkillIds ?? []
@@ -142,32 +150,40 @@ export class LoopStudyRelayConversationAdapter {
             now: this.now
           });
 
+    let responseContent = response.value.responseContent;
     let responseText = response.value.responseText;
     let artifactIds: readonly string[] = [];
     let relayTaskId = response.value.taskId;
     let relayWorkPlanId = response.value.workPlanId;
 
-    if (!responseText || !response.value.responseMessageId || !relayTaskId) {
+    if (
+      (!responseContent && !responseText) ||
+      !response.value.responseMessageId ||
+      !relayTaskId ||
+      artifactIds.length === 0
+    ) {
       const inspection = await this.fetchInspectionResponse(response.value.messageId);
       if (!inspection.ok) {
         return inspection;
       }
 
+      responseContent = responseContent ?? inspection.value.responseContent;
       responseText = responseText ?? inspection.value.responseText;
       artifactIds = inspection.value.artifactIds;
       relayTaskId = relayTaskId ?? inspection.value.taskId;
       relayWorkPlanId = relayWorkPlanId ?? inspection.value.workPlanId;
     }
 
-    if (!responseText) {
+    if (!responseContent && !responseText) {
       return err({
         code: "STATE_CONFLICT",
-        message: "Relay runtime did not return responseText for this conversation turn."
+        message: "Relay runtime did not return structured response content for this conversation turn."
       });
     }
 
     return ok({
       binding: runtimeConversationBinding,
+      responseContent,
       responseText,
       correlation: {
         relayArtifactIds: artifactIds,
@@ -185,6 +201,7 @@ export class LoopStudyRelayConversationAdapter {
   ): Promise<
     Result<{
       artifactIds: readonly string[];
+      responseContent?: unknown;
       responseText?: string;
       taskId?: string;
       workPlanId?: string;
@@ -205,6 +222,7 @@ export class LoopStudyRelayConversationAdapter {
     }
 
     return ok({
+      responseContent: inspection.value.responseContent,
       responseText: inspection.value.responseText,
       taskId: inspection.value.task?.id,
       workPlanId: inspection.value.task?.workPlanId,
@@ -257,6 +275,10 @@ export class LoopStudyRelayConversationAdapter {
 
     return ok((await response.json()) as TValue);
   }
+}
+
+function normalizeRelayRecipient(value: string): string {
+  return value.startsWith("@") ? value : `@${value}`;
 }
 
 function collectArtifactIds(

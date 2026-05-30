@@ -26,7 +26,10 @@ export interface StructuredMasterDataFields {
 
 export interface ParsedMasterDataSummary {
   documentTitle?: string;
+  learnerFacingMaterialSummary?: string;
+  learningObjectives?: readonly string[];
   mainTopic?: string;
+  processes?: readonly string[];
   subject?: string;
   yearGroup?: string;
   subtopics: readonly string[];
@@ -369,6 +372,8 @@ function parseLegacyInput(
       mainTopic: fallbackTopic,
       subject: fallbackSubject,
       yearGroup: fallbackYearGroup,
+      learningObjectives: [],
+      processes: [],
       subtopics: [],
       keyPeople: [],
       keyTerms: [],
@@ -424,7 +429,10 @@ function extractAnchor(content: string): string | undefined {
   const properNouns = content.match(
     /\b(?:[A-Z][a-z]+|[A-Z][a-z]+(?:\s+(?:[IVX]+|of|the|and|[A-Z][a-z]+))+)\b/g
   );
-  return properNouns?.find((candidate) => candidate.length > 2);
+  return properNouns?.find(
+    (candidate) =>
+      candidate.length > 2 && !/^(?:The|A|An)$/i.test(candidate.trim())
+  );
 }
 
 function buildPrompt(item: StructuredMasterDataFields): string {
@@ -723,7 +731,10 @@ function parseStructuredInput(
     structuredItems,
     summary: {
       documentTitle: documentTitle || undefined,
+      learnerFacingMaterialSummary: undefined,
+      learningObjectives: [],
       mainTopic: mainTopic || undefined,
+      processes: [],
       subject: subject ?? fallbackSubject,
       yearGroup: yearGroup ?? fallbackYearGroup,
       subtopics: [...subtopics],

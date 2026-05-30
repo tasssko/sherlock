@@ -48,7 +48,8 @@ export interface CreateServerControllers {
 }
 
 async function createAgentRuntime(
-  provisioner?: Pick<RelayWorkspaceProvisioner, "ensureProvisionedBinding">
+  provisioner?: Pick<RelayWorkspaceProvisioner, "ensureProvisionedBinding">,
+  diagnosticsLogger?: RuntimeBootLogger
 ): Promise<RuntimeBootstrap> {
   const runtimeConfig = loadLoopStudyRuntimeConfig(process.env);
   if (runtimeConfig.runtimeMode === "relay" && runtimeConfig.relay) {
@@ -63,7 +64,8 @@ async function createAgentRuntime(
 
     return {
       agentRuntime: new RelayAgentRuntime({
-        binding
+        binding,
+        diagnosticsLogger
       }),
       compatibilityWarnings: runtimeConfig.compatibilityWarnings,
       runtimeMode: "relay",
@@ -162,7 +164,7 @@ export async function createServer(controllers: CreateServerControllers = {}) {
   );
   const runtimeBootstrap = controllers.agentRuntime
     ? describeInjectedRuntime(controllers.agentRuntime)
-    : await createAgentRuntime(controllers.relayWorkspaceProvisioner);
+    : await createAgentRuntime(controllers.relayWorkspaceProvisioner, server.log);
   const agentRuntime = runtimeBootstrap.agentRuntime;
   logRuntimeBootstrap(controllers.runtimeBootLogger ?? server.log, runtimeBootstrap);
   const studyPlanController =
@@ -173,7 +175,7 @@ export async function createServer(controllers: CreateServerControllers = {}) {
   const assessmentAttemptController =
     controllers.assessmentAttemptController ?? new AssessmentAttemptController(repository, agentRuntime);
   const masterDataUploadController =
-    controllers.masterDataUploadController ?? new MasterDataUploadController(repository);
+    controllers.masterDataUploadController ?? new MasterDataUploadController(repository, agentRuntime);
   const learningLoopController =
     controllers.learningLoopController ?? new LearningLoopController(repository);
   const practiceActivityController =

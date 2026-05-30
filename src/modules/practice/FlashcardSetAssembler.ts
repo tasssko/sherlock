@@ -5,6 +5,8 @@ import type { DomainEventRecorder } from "../../domain/primitives/Event.js";
 import type { Task } from "../../domain/primitives/Task.js";
 import type { Workspace } from "../../domain/primitives/Workspace.js";
 import type { LearningLoop } from "../../domain/learning/LearningLoop.js";
+import type { MasterDataInterpretationCandidate } from "../masterData/MasterDataInterpretation.js";
+import { selectInterpretationObjectives } from "../masterData/MasterDataInterpretation.js";
 import { ok, type Result } from "../../domain/primitives/result.js";
 import { createPracticeActivityAgent, validatePracticeActivity } from "./PracticeActivityAgent.js";
 import { PracticeActivityQualityValidator } from "./PracticeActivityQualityValidator.js";
@@ -31,6 +33,7 @@ export class FlashcardSetAssembler {
     context: PracticeActivityContext;
     events: DomainEventRecorder;
     learningLoop: LearningLoop;
+    materialInterpretation?: MasterDataInterpretationCandidate;
     runtimeConversationBinding?: RuntimeConversationBinding;
     selections: readonly PracticeActivitySelection[];
     task: Task;
@@ -39,6 +42,7 @@ export class FlashcardSetAssembler {
     const generated = await this.runtime.generatePracticeActivity({
       context: input.context,
       learningLoopId: input.learningLoop.id,
+      materialInterpretation: input.materialInterpretation,
       selections: input.selections.map(({ gap, item }) => ({
         gap: {
           id: gap.id,
@@ -61,6 +65,11 @@ export class FlashcardSetAssembler {
       instructions: generated.value.flashcardSet.instructions,
       cards: validatedCards.value
     };
+    const learningObjectives = selectInterpretationObjectives({
+      interpretation: input.materialInterpretation,
+      sourceRefs: input.selections.map(({ item }) => item.sourceRef ?? item.id),
+      fallbackObjectives: input.selections.map(({ gap }) => gap.toSnapshot().description)
+    });
     const agent = createPracticeActivityAgent();
     const policyEvaluation = validatePracticeActivity(agent, input.context, flashcardSet, input.events);
     if (!policyEvaluation.ok) {
@@ -75,7 +84,7 @@ export class FlashcardSetAssembler {
         title: `Flashcard practice for ${input.context.topic}`,
         taskId: input.task.id,
         targetKnowledgeGapIds: input.selections.map(({ gap }) => gap.id),
-        learningObjectives: input.selections.map(({ gap }) => gap.toSnapshot().description),
+        learningObjectives,
         sourceMasterDataItemIds: input.selections.map(({ item }) => item.id),
         flashcardSet
       }),

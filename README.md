@@ -50,6 +50,21 @@ For local Relay-backed development:
 ./scripts/dev-relay.sh
 ```
 
+For a Relay bridge smoke check against the canonical demo corpus:
+
+```bash
+pnpm smoke:relay
+pnpm smoke:relay -- coasts
+```
+
+For an optional live Relay material-intake smoke, provide the normal Relay env plus:
+
+```bash
+LOOP_STUDY_RUN_LIVE_RELAY_SMOKE=1 pnpm test:relay:live-intake
+```
+
+This live-gated check uses the public `loop.study` material upload route with a canonical demo document, asserts that Relay returns structured `responseContent`, verifies the accepted interpretation, and confirms learner-facing payloads stay free of Relay ids. Without `LOOP_STUDY_RUN_LIVE_RELAY_SMOKE=1`, the spec is skipped.
+
 ## Current Vertical Slices
 
 `POST /v1/master-data` uploads approved curriculum or study-source items for later assessment generation.

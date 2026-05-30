@@ -16,17 +16,17 @@ function createWorkspaceRecord(overrides: Partial<RelayWorkspaceRecord> = {}): R
     name: "Study Advisor Workspace",
     slug: "study-advisor-workspace",
     status: "active",
-    defaultControllerId: "controller.supervisor_workplan",
+    defaultControllerId: undefined,
     context: {
       operatingInstructions: [],
-      defaultSupervisorAgentHandle: "supervisor",
-      availableAgentHandles: ["supervisor"]
+      defaultSupervisorAgentHandle: "tutor",
+      availableAgentHandles: ["tutor"]
     },
     defaultPolicy: {
       requireApprovalForSideEffects: [],
       allowTaskCreationFromConversation: true,
       allowMessageOnlyResponses: true,
-      allowSupervisorDelegation: true,
+      allowSupervisorDelegation: false,
       allowAgentToAgentDelegation: false
     },
     createdAt: "2026-05-30T00:00:00.000Z",
@@ -97,9 +97,9 @@ describe("Relay workspace provisioner", () => {
         return new Response(
           JSON.stringify({
             workspace,
-            defaultControllerId: "controller.supervisor_workplan",
-            agentHandles: ["@supervisor"],
-            controllerIds: ["controller.supervisor_workplan"],
+            defaultControllerId: undefined,
+            agentHandles: ["@tutor"],
+            controllerIds: [],
             skillIds: [],
             toolIds: []
           }),
@@ -148,9 +148,9 @@ describe("Relay workspace provisioner", () => {
         return new Response(
           JSON.stringify({
             workspace,
-            defaultControllerId: "controller.supervisor_workplan",
-            agentHandles: ["@supervisor"],
-            controllerIds: ["controller.supervisor_workplan"],
+            defaultControllerId: undefined,
+            agentHandles: ["@tutor"],
+            controllerIds: [],
             skillIds: [],
             toolIds: []
           }),
@@ -197,9 +197,9 @@ describe("Relay workspace provisioner", () => {
           return new Response(
             JSON.stringify({
               workspace: createWorkspaceRecord(),
-              defaultControllerId: "controller.supervisor_workplan",
-              agentHandles: ["@supervisor"],
-              controllerIds: ["controller.supervisor_workplan"],
+              defaultControllerId: undefined,
+              agentHandles: ["@tutor"],
+              controllerIds: [],
               skillIds: [],
               toolIds: []
             }),
@@ -217,15 +217,68 @@ describe("Relay workspace provisioner", () => {
     const calls: { to: string; workspaceId: string }[] = [];
     const runtime = new RelayAgentRuntime({
       binding: provisionedBinding,
-      fetcher: (async (_input, init) => {
+      fetcher: (async (input, init) => {
+        const url =
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url;
+        const method = init?.method ?? "GET";
+
+        if (url.endsWith("/v1/messages/relay_message_test/inspection") && method === "GET") {
+          return new Response(
+            JSON.stringify({
+              artifacts: [{ id: "relay_artifact_test" }],
+              responseText: JSON.stringify({
+                result: {
+                  items: [
+                    {
+                      id: "assessment_item_1",
+                      topic: "fractions",
+                      prompt: "Simplify 6/8.",
+                      canonicalAnswer: "three quarters",
+                      visibleMaterial: "Fractions can describe equal parts of a whole.",
+                      difficulty: "easy",
+                      sourceMasterDataItemId: "master_data_1"
+                    }
+                  ],
+                  artifactContent: {
+                    topic: "fractions",
+                    questionCount: 1,
+                    instructions: "Complete the question without notes.",
+                    items: [
+                      {
+                        id: "assessment_item_1",
+                        prompt: "Simplify 6/8.",
+                        difficulty: "easy"
+                      }
+                    ]
+                  }
+                }
+              }),
+              task: {
+                id: "relay_task_test"
+              },
+              resultEvents: [{ artifactId: "relay_artifact_test" }]
+            }),
+            {
+              status: 200,
+              headers: { "content-type": "application/json" }
+            }
+          );
+        }
+
         const body = JSON.parse(String(init?.body ?? "{}")) as {
           to?: string;
           workspaceId?: string;
         };
-        calls.push({
-          to: String(body.to ?? ""),
-          workspaceId: String(body.workspaceId ?? "")
-        });
+        if (url.endsWith("/v1/messages") && method === "POST") {
+          calls.push({
+            to: String(body.to ?? ""),
+            workspaceId: String(body.workspaceId ?? "")
+          });
+        }
 
         return new Response(
           JSON.stringify({
@@ -295,7 +348,7 @@ describe("Relay workspace provisioner", () => {
     expect(result.ok).toBe(true);
     expect(calls).toEqual([
       {
-        to: "supervisor",
+        to: "@tutor",
         workspaceId: "workspace_study_advisor"
       }
     ]);

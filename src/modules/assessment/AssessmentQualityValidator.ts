@@ -10,7 +10,14 @@ function normalize(value: string): string {
 }
 
 export class AssessmentQualityValidator {
-  validate(items: readonly AssessmentItem[]): Result<readonly AssessmentItem[]> {
+  validate(items: readonly AssessmentItem[] | null | undefined): Result<readonly AssessmentItem[]> {
+    if (!Array.isArray(items)) {
+      return err({
+        code: "VALIDATION_ERROR",
+        message: "Assessment generation did not return a valid items array."
+      });
+    }
+
     for (const item of items) {
       const normalizedPrompt = normalize(item.prompt);
       const normalizedAnswer = normalize(item.canonicalAnswer);

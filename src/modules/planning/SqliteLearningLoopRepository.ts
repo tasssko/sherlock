@@ -240,6 +240,23 @@ export class SqliteLearningLoopRepository implements LearningLoopRepository {
     return [...bySource.values()];
   }
 
+  findMasterDataSourcesByIds(sourceIds: readonly string[]): readonly MasterDataSource[] {
+    if (sourceIds.length === 0) {
+      return [];
+    }
+
+    const lookup = this.database.prepare(
+      "select snapshot from master_data_sources where id = ?"
+    );
+
+    return sourceIds
+      .map((sourceId) => {
+        const row = lookup.get(sourceId) as { snapshot: string } | undefined;
+        return row ? MasterDataSource.rehydrate(parseSnapshot(row.snapshot)) : undefined;
+      })
+      .filter((source): source is MasterDataSource => Boolean(source));
+  }
+
   registerMasterData(command: UploadMasterDataCommand): MasterDataUploadResponse {
     const items: MasterDataItem[] = [];
     const temporarySource = MasterDataSource.create(command.sourceName, []);
@@ -248,13 +265,19 @@ export class SqliteLearningLoopRepository implements LearningLoopRepository {
       items.push(MasterDataItem.create(temporarySource.id, item));
     }
 
-    const source = MasterDataSource.create(command.sourceName, items.map((item) => item.id));
+    const source = MasterDataSource.create(command.sourceName, items.map((item) => item.id), {
+      rawSourceContent: command.rawSourceContent,
+      contentType: command.contentType,
+      learnerYearGroup: command.learnerYearGroup,
+      userHints: command.userHints,
+      acceptedInterpretation: command.acceptedInterpretation
+    });
 
     this.database.exec("begin");
     try {
       this.database
         .prepare("insert into master_data_sources (id, name, snapshot) values (?, ?, ?)")
-        .run(source.id, source.name, JSON.stringify(source.toSnapshot()));
+        .run(source.id, source.name, JSON.stringify(source.toStorageSnapshot()));
 
       const insertItem = this.database.prepare(
         `insert into master_data_items
@@ -267,7 +290,7 @@ export class SqliteLearningLoopRepository implements LearningLoopRepository {
           source.id,
           source.name,
           item.topic,
-          JSON.stringify(source.toSnapshot()),
+          JSON.stringify(source.toStorageSnapshot()),
           JSON.stringify(item.toSnapshot())
         );
       }

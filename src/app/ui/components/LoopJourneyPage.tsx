@@ -819,6 +819,20 @@ export function LoopJourneyPage(props: LoopJourneyPageProps) {
                             {renderSummaryList("Key people", masterDataSummary.keyPeople)}
                             {renderSummaryList("Key terms", masterDataSummary.keyTerms)}
                             {renderSummaryList("Important dates", masterDataSummary.importantDates)}
+                            {renderSummaryList(
+                              "Learning objectives",
+                              masterDataSummary.learningObjectives ?? []
+                            )}
+                            {renderSummaryList(
+                              "Processes",
+                              masterDataSummary.processes ?? []
+                            )}
+                            {masterDataSummary.learnerFacingMaterialSummary ? (
+                              <section className="completion-card">
+                                <p className="subtle-heading">Coach summary</p>
+                                <p>{masterDataSummary.learnerFacingMaterialSummary}</p>
+                              </section>
+                            ) : null}
                           </section>
                         ) : null}
                         <button
@@ -1220,6 +1234,11 @@ export function LoopJourneyPage(props: LoopJourneyPageProps) {
                         {renderSummaryList("Key people", masterDataSummary.keyPeople)}
                         {renderSummaryList("Key terms", masterDataSummary.keyTerms)}
                         {renderSummaryList("Important dates", masterDataSummary.importantDates)}
+                        {renderSummaryList(
+                          "Learning objectives",
+                          masterDataSummary.learningObjectives ?? []
+                        )}
+                        {renderSummaryList("Processes", masterDataSummary.processes ?? [])}
                       </div>
                     ) : (
                       <div className="checkpoint-row">

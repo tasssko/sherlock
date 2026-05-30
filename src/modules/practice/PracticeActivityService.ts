@@ -77,6 +77,7 @@ export class PracticeActivityService {
       context,
       events,
       learningLoop,
+      materialInterpretation: selection.value.selections[0]?.source.acceptedInterpretation,
       runtimeConversationBinding: record.runtimeConversationBindings.find(
         (binding) => binding.learningLoopId === learningLoop.id
       ),

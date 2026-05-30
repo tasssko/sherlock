@@ -15,9 +15,11 @@
     "typecheck:frontend": "tsc --noEmit -p tsconfig.frontend.json",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:relay:live-intake": "vitest run -- test/relay-material-intake.live.spec.ts",
     "dev:api": "tsx src/app/api/server.ts",
     "dev:frontend": "vite --host 127.0.0.1 --port 4174",
-    "start:api": "node dist/app/api/server.js"
+    "start:api": "node dist/app/api/server.js",
+    "smoke:relay": "tsx scripts/relay-smoke.ts"
   },
   "dependencies": {
     "fastify": "^5.3.3",

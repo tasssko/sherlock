@@ -3,6 +3,10 @@ import type { UploadMasterDataCommand } from "../../domain/study/MasterDataUploa
 import type { CompletePracticeActivityCommand } from "../../domain/study/PracticeActivities.js";
 import type { LearningLoopResumeResponse } from "../../domain/study/LearningLoops.js";
 import type { StudyDay } from "../../domain/study/StudySchedule.js";
+import {
+  decodeInterpretationSummaryFromItems,
+  type MasterDataInterpretationSummary
+} from "../../modules/masterData/MasterDataInterpretation.js";
 import { parseMasterDataInput } from "../../modules/masterData/structuredRevision.js";
 import {
   completePracticeActivity,
@@ -83,10 +87,29 @@ function buildUploadCommand(input: {
 }): UploadMasterDataCommand {
   const parsed = parseMasterDataInput(input);
   const detectedTopic = parsed.summary.mainTopic?.trim() || input.fallbackTopic;
+  const fallbackItem =
+    parsed.items[0] ??
+    {
+      topic: detectedTopic,
+      prompt: `What is one key idea from ${detectedTopic}?`,
+      canonicalAnswer:
+        input.lines
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .find(Boolean) ?? input.sourceName,
+      visibleMaterial: input.lines.slice(0, 280) || input.sourceName
+    };
 
   return {
+    rawSourceContent: input.lines,
+    contentType: input.lines.includes("||") ? "text/plain" : "text/markdown",
+    learnerYearGroup: input.fallbackYearGroup,
+    userHints: {
+      subject: input.fallbackSubject,
+      topic: detectedTopic
+    },
     sourceName: input.sourceName,
-    items: parsed.items.map((item) => ({
+    items: (parsed.items.length > 0 ? parsed.items : [fallbackItem]).map((item) => ({
       ...item,
       topic: detectedTopic || item.topic
     }))
@@ -118,6 +141,8 @@ export function App() {
   const [resumePending, setResumePending] = useState(false);
   const [resumeError, setResumeError] = useState<string | null>(null);
   const [loopState, setLoopState] = useState<LearningLoopResumeResponse | null>(null);
+  const [uploadedMasterDataSummary, setUploadedMasterDataSummary] =
+    useState<MasterDataInterpretationSummary | null>(null);
   const [masterDataStatus, setMasterDataStatus] = useState<string | null>(null);
   const [masterDataPending, setMasterDataPending] = useState(false);
   const [masterDataError, setMasterDataError] = useState<string | null>(null);
@@ -152,6 +177,10 @@ export function App() {
       selectedDemoDocument?.subject
     ]
   );
+  const effectiveMasterDataSummary = uploadedMasterDataSummary ?? parsedMasterData.summary;
+  const effectiveMasterDataSummaryMode = uploadedMasterDataSummary
+    ? "structured"
+    : parsedMasterData.mode;
 
   async function loadLearningLoop(learningLoopId: string) {
     setResumePending(true);
@@ -225,11 +254,13 @@ export function App() {
         fallbackYearGroup: loopValues.yearGroup
       });
       const uploaded = await uploadMasterData(apiBaseUrl, command);
+      const interpretedSummary = decodeInterpretationSummaryFromItems(uploaded.items);
       setLoopValues((current) => ({
         ...current,
-        topic: detectedTopic,
-        yearGroup: detectedYearGroup
+        topic: interpretedSummary?.mainTopic?.trim() || detectedTopic,
+        yearGroup: interpretedSummary?.yearGroup?.trim() || detectedYearGroup
       }));
+      setUploadedMasterDataSummary(interpretedSummary ?? null);
       setMasterDataStatus(
         `${uploaded.items.length} study prompts are ready in ${uploaded.source.name}.`
       );
@@ -382,6 +413,7 @@ export function App() {
       ...draft.loopValues
     }));
     setMasterDataValues(draft.masterDataValues);
+    setUploadedMasterDataSummary(null);
     setMasterDataStatus(null);
     setMasterDataError(null);
   }
@@ -403,12 +435,16 @@ export function App() {
         fallbackYearGroup: selectedDemoDocument.yearGroup
       });
       const uploaded = await uploadMasterData(apiBaseUrl, command);
+      const interpretedSummary = decodeInterpretationSummaryFromItems(uploaded.items);
       const draft = applyDemoDocumentToForm(selectedDemoDocument);
       setLoopValues((current) => ({
         ...current,
-        ...draft.loopValues
+        ...draft.loopValues,
+        topic: interpretedSummary?.mainTopic?.trim() || draft.loopValues.topic,
+        yearGroup: interpretedSummary?.yearGroup?.trim() || draft.loopValues.yearGroup
       }));
       setMasterDataValues(draft.masterDataValues);
+      setUploadedMasterDataSummary(interpretedSummary ?? null);
       setMasterDataStatus(
         `${uploaded.items.length} study prompts are ready from ${selectedDemoDocument.label}.`
       );
@@ -436,8 +472,8 @@ export function App() {
       masterDataError={masterDataError}
       masterDataPending={masterDataPending}
       masterDataStatus={masterDataStatus}
-      masterDataSummary={parsedMasterData.summary}
-      masterDataSummaryMode={parsedMasterData.mode}
+      masterDataSummary={effectiveMasterDataSummary}
+      masterDataSummaryMode={effectiveMasterDataSummaryMode}
       masterDataValues={masterDataValues}
       practiceError={practiceError}
       practicePending={practicePending}
@@ -456,11 +492,17 @@ export function App() {
       onGenerateReview={handlePracticeGenerate}
       onLoopValuesChange={setLoopValues}
       onMasterDataSubmit={handleMasterDataSubmit}
-      onMasterDataValuesChange={setMasterDataValues}
+      onMasterDataValuesChange={(nextValues) => {
+        setUploadedMasterDataSummary(null);
+        setMasterDataValues(nextValues);
+      }}
       onResumeLoopIdChange={setResumeLoopId}
       onResumeSubmit={handleResumeSubmit}
       onReviewSubmit={handlePracticeCompletionSubmit}
-      onSelectedDemoMaterialChange={setSelectedDemoMaterialId}
+      onSelectedDemoMaterialChange={(id) => {
+        setUploadedMasterDataSummary(null);
+        setSelectedDemoMaterialId(id);
+      }}
     />
   );
 }

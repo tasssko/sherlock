@@ -21,6 +21,9 @@ import type { AssessmentArtifactContent } from "../../domain/study/AssessmentGen
 import type { StudyPlanArtifactContent } from "../../domain/study/StudyPlanning.js";
 import type { RuntimeTraceSeed } from "./RuntimeTrace.js";
 import type { RuntimeConversationBinding } from "./RuntimeConversationBinding.js";
+import type {
+  MasterDataInterpretationCandidate
+} from "../masterData/MasterDataInterpretation.js";
 
 export interface AssessmentItemCandidate extends AssessmentItem {}
 
@@ -73,6 +76,12 @@ export interface ActiveReviewEvaluationCandidate {
   }[];
 }
 
+export interface MasterDataInterpretationResultCandidate {
+  interpretation: MasterDataInterpretationCandidate;
+  runtimeConversationBinding?: RuntimeConversationBinding;
+  runtimeTrace?: RuntimeTraceSeed;
+}
+
 export interface AgentRuntime {
   evaluateActiveReviewSession(input: {
     learningLoopId: string;
@@ -93,6 +102,24 @@ export interface AgentRuntime {
     }[];
     runtimeConversationBinding?: RuntimeConversationBinding;
   }): Promise<Result<AssessmentAttemptEvaluationCandidate>> | Result<AssessmentAttemptEvaluationCandidate>;
+  interpretMasterData(input: {
+    contentType: string;
+    expectedOutputSchema: "MasterDataInterpretationCandidate.v1";
+    fallbackItems?: readonly {
+      canonicalAnswer: string;
+      prompt: string;
+      topic: string;
+      visibleMaterial: string;
+    }[];
+    learnerYearGroup?: string;
+    rawSourceContent: string;
+    sourceId: string;
+    sourceName: string;
+    userHints?: {
+      subject?: string;
+      topic?: string;
+    };
+  }): Promise<Result<MasterDataInterpretationResultCandidate>> | Result<MasterDataInterpretationResultCandidate>;
   generateInitialAssessment(input: {
     context: InitialAssessmentContext;
     learningLoopId: string;
@@ -103,6 +130,7 @@ export interface AgentRuntime {
   generatePracticeActivity(input: {
     context: PracticeActivityContext;
     learningLoopId: string;
+    materialInterpretation?: MasterDataInterpretationCandidate;
     selections: readonly {
       gap: {
         description: string;
@@ -115,6 +143,7 @@ export interface AgentRuntime {
   generateStudyPlan(input: {
     context: StudyPlanningContext;
     learningLoopId: string;
+    materialInterpretations?: readonly MasterDataInterpretationCandidate[];
     runtimeConversationBinding?: RuntimeConversationBinding;
   }): Promise<Result<StudyPlanGenerationCandidate>> | Result<StudyPlanGenerationCandidate>;
 }

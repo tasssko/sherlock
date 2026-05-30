@@ -32,26 +32,89 @@ function normalize(value: string): string {
     .trim();
 }
 
-function parseRelayConversationRequest(messageText: string): {
+function parseRelayConversationRequest(content: {
+  input?: Record<string, unknown>;
+  name?: string;
+  text?: string;
+  type?: string;
+}): {
   operation: string;
   payload: any;
   stage: string;
 } {
-  const marker = "Structured context:\n";
-  const index = messageText.indexOf(marker);
-  const payloadText =
-    index >= 0 ? messageText.slice(index + marker.length) : "{}";
+  if (content.type === "command") {
+    const operation = commandNameToOperation(content.name);
+    return {
+      operation,
+      payload: content.input ?? {},
+      stage: stageForOperation(operation)
+    };
+  }
 
-  return JSON.parse(payloadText) as {
-    operation: string;
-    payload: any;
-    stage: string;
-  };
+  const marker = "Structured context:\n";
+  const messageText = content.text ?? "";
+  const index = messageText.indexOf(marker);
+  const payloadText = index >= 0 ? messageText.slice(index + marker.length) : "{}";
+  return JSON.parse(payloadText) as { operation: string; payload: any; stage: string };
+}
+
+function commandNameToOperation(name: string | undefined): string {
+  switch (name) {
+    case "loop_study.interpret_master_data":
+      return "interpretMasterData";
+    case "loop_study.generate_initial_assessment":
+      return "generateInitialAssessment";
+    case "loop_study.evaluate_assessment_attempt":
+      return "evaluateAssessmentAttempt";
+    case "loop_study.generate_study_plan":
+      return "generateStudyPlan";
+    case "loop_study.generate_practice_activity":
+      return "generatePracticeActivity";
+    case "loop_study.evaluate_active_review_session":
+      return "evaluateActiveReviewSession";
+    default:
+      return "unknown";
+  }
+}
+
+function stageForOperation(operation: string): string {
+  switch (operation) {
+    case "interpretMasterData":
+      return "material-intake";
+    case "generateInitialAssessment":
+    case "evaluateAssessmentAttempt":
+      return "diagnosis";
+    case "generateStudyPlan":
+      return "planning";
+    case "generatePracticeActivity":
+      return "practice";
+    case "evaluateActiveReviewSession":
+      return "review";
+    default:
+      return "loop";
+  }
 }
 
 function createRelayFetchStub(): typeof fetch {
   return (async (_input, init) => {
     const url = typeof _input === "string" ? _input : _input instanceof URL ? _input.toString() : _input.url;
+    const method = init?.method ?? "GET";
+    if (url.includes("/v1/messages/") && url.endsWith("/inspection") && method === "GET") {
+      return new Response(
+        JSON.stringify({
+          artifacts: [{ id: "relay_artifact_test" }],
+          resultEvents: [{ artifactId: "relay_artifact_test" }],
+          task: {
+            id: "relay_task_inspection"
+          }
+        }),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        }
+      );
+    }
+
     if (!url.endsWith("/v1/messages")) {
       return new Response(JSON.stringify({ error: "not found" }), {
         status: 404,
@@ -61,10 +124,14 @@ function createRelayFetchStub(): typeof fetch {
 
     const body = JSON.parse(String(init?.body ?? "{}")) as {
       content: {
-        text: string;
+        expectedOutputSchema?: string;
+        input?: Record<string, unknown>;
+        name?: string;
+        text?: string;
+        type?: string;
       };
     };
-    const relayRequest = parseRelayConversationRequest(body.content.text);
+    const relayRequest = parseRelayConversationRequest(body.content);
     const responseEnvelope = {
       conversationId: `relay_conversation_${relayRequest.payload.context?.learningLoopId ?? relayRequest.operation}`,
       messageId: `relay_message_${relayRequest.operation}`,
@@ -72,9 +139,9 @@ function createRelayFetchStub(): typeof fetch {
       taskId: `relay_task_${relayRequest.operation}`,
       workPlanId:
         relayRequest.operation === "generateStudyPlan" ? "relay_workplan_1" : undefined,
-      responseText: JSON.stringify({
+      responseContent: {
         result: buildRelayResult(relayRequest.operation, relayRequest.payload)
-      })
+      }
     };
 
     return new Response(JSON.stringify(responseEnvelope), {
@@ -86,16 +153,38 @@ function createRelayFetchStub(): typeof fetch {
 
 function createRelayHandleCaptureStub(calls: string[]): typeof fetch {
   return (async (_input, init) => {
+    const url = typeof _input === "string" ? _input : _input instanceof URL ? _input.toString() : _input.url;
+    const method = init?.method ?? "GET";
+    if (url.includes("/v1/messages/") && url.endsWith("/inspection") && method === "GET") {
+      return new Response(
+        JSON.stringify({
+          artifacts: [{ id: "relay_artifact_test" }],
+          resultEvents: [{ artifactId: "relay_artifact_test" }],
+          task: {
+            id: "relay_task_test"
+          }
+        }),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        }
+      );
+    }
+
     const body = JSON.parse(String(init?.body ?? "{}")) as {
       conversationId?: string;
       content: {
-        text: string;
+        expectedOutputSchema?: string;
+        input?: Record<string, unknown>;
+        name?: string;
+        text?: string;
+        type?: string;
       };
       metadata?: Record<string, unknown>;
       to?: string;
     };
     calls.push(String(body.to ?? ""));
-    const relayRequest = parseRelayConversationRequest(body.content.text);
+    const relayRequest = parseRelayConversationRequest(body.content);
 
     return new Response(
       JSON.stringify({
@@ -103,6 +192,62 @@ function createRelayHandleCaptureStub(calls: string[]): typeof fetch {
         messageId: `relay_message_${relayRequest.operation}`,
         responseMessageId: `relay_response_${relayRequest.operation}`,
         taskId: "relay_task_test",
+        responseContent: {
+          result: buildRelayResult(relayRequest.operation, relayRequest.payload)
+        }
+      }),
+      {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      }
+    );
+  }) as typeof fetch;
+}
+
+function createRelayTextFallbackFetchStub(): typeof fetch {
+  return (async (_input, init) => {
+    const url = typeof _input === "string" ? _input : _input instanceof URL ? _input.toString() : _input.url;
+    const method = init?.method ?? "GET";
+    if (url.includes("/v1/messages/") && url.endsWith("/inspection") && method === "GET") {
+      return new Response(
+        JSON.stringify({
+          artifacts: [{ id: "relay_artifact_text_fallback" }],
+          resultEvents: [{ artifactId: "relay_artifact_text_fallback" }],
+          task: {
+            id: "relay_task_text_fallback"
+          }
+        }),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        }
+      );
+    }
+
+    if (!url.endsWith("/v1/messages")) {
+      return new Response(JSON.stringify({ error: "not found" }), {
+        status: 404,
+        headers: { "content-type": "application/json" }
+      });
+    }
+
+    const body = JSON.parse(String(init?.body ?? "{}")) as {
+      content: {
+        expectedOutputSchema?: string;
+        input?: Record<string, unknown>;
+        name?: string;
+        text?: string;
+        type?: string;
+      };
+    };
+    const relayRequest = parseRelayConversationRequest(body.content);
+
+    return new Response(
+      JSON.stringify({
+        conversationId: "relay_conversation_text_fallback",
+        messageId: `relay_message_${relayRequest.operation}`,
+        responseMessageId: `relay_response_${relayRequest.operation}`,
+        taskId: "relay_task_text_fallback",
         responseText: JSON.stringify({
           result: buildRelayResult(relayRequest.operation, relayRequest.payload)
         })
@@ -160,15 +305,57 @@ function createRelayBinding(overrides: {
 }
 
 function buildRelayResult(operation: string, payload: any): unknown {
+  if (operation === "interpretMasterData") {
+    const topic = payload.userHints?.topic ?? "fractions";
+    return {
+      interpretation: {
+        schema: "MasterDataInterpretationCandidate.v1",
+        detectedSubject: payload.userHints?.subject ?? "Mathematics",
+        detectedYearGroup: payload.learnerYearGroup ?? "Year 7",
+        mainTopic: topic,
+        subtopics: ["Core facts"],
+        keyPeople: [],
+        keyTerms: ["equivalent fractions"],
+        importantDates: [],
+        processes: [],
+        learnerFacingMaterialSummary: `${topic} for Year 7 focuses on core facts such as equal parts of a whole and equivalent fractions.`,
+        learningObjectives: [
+          {
+            id: "objective_1",
+            objective: `Explain how ${topic} represent equal parts of a whole in the Core facts strand.`,
+            sourceRefs: ["fractions > fallback-1"]
+          }
+        ],
+        sourceMap: [
+          {
+            sourceRef: "fractions > fallback-1",
+            excerpt: payload.rawSourceContent ?? "Fractions can describe equal parts of a whole."
+          }
+        ],
+        items: [
+          {
+            subject: payload.userHints?.subject ?? "Mathematics",
+            yearGroup: payload.learnerYearGroup ?? "Year 7",
+            topic,
+            subtopic: "Core facts",
+            itemType: "fact",
+            content: "Fractions can describe equal parts of a whole.",
+            sourceRef: "fractions > fallback-1"
+          }
+        ]
+      }
+    };
+  }
+
   if (operation === "generateInitialAssessment") {
-    const items = payload.sourceItems.map((item: any, index: number) => ({
+    const items = payload.relevantSourceExcerpts.map((item: any, index: number) => ({
       id: `assessment_item_${index + 1}`,
-      topic: item.topic,
-      prompt: item.prompt,
-      canonicalAnswer: item.canonicalAnswer,
-      visibleMaterial: item.visibleMaterial,
+      topic: payload.topic ?? item.topic,
+      prompt: `What should you remember about ${item.subtopic}? [Source: ${item.sourceRef}]`,
+      canonicalAnswer: item.content,
+      visibleMaterial: `Source ref: ${item.sourceRef} · ${item.topic} · recall from notes`,
       difficulty: difficultyScale[index] ?? "stretch",
-      sourceMasterDataItemId: item.id
+      sourceMasterDataItemId: item.sourceRef
     }));
 
     return {
@@ -228,7 +415,7 @@ function buildRelayResult(operation: string, payload: any): unknown {
         cards: payload.selections.map((selection: any, index: number) => ({
           id: `flashcard_${index + 1}`,
           front: selection.item.prompt,
-          back: selection.item.canonicalAnswer,
+          back: selection.item.content ?? selection.item.canonicalAnswer,
           topic: selection.item.topic,
           knowledgeGapId: selection.gap.id,
           learningObjective: selection.gap.description,
@@ -621,6 +808,163 @@ describe("Agent runtime contract", () => {
     );
   });
 
+  it("accepts Relay responseText as a compatibility fallback when responseContent is absent", async () => {
+    const runtime = new RelayAgentRuntime({
+      binding: createRelayBinding(),
+      fetcher: createRelayTextFallbackFetchStub()
+    });
+
+    const source = MasterDataSource.create("Fractions Bank", []);
+    const sourceItem = MasterDataItem.create(source.id, {
+      topic: "fractions",
+      prompt: "Simplify 6/8.",
+      canonicalAnswer: "three quarters",
+      visibleMaterial: "Fractions can describe equal parts of a whole."
+    });
+    const context = InitialAssessmentContext.create({
+      command: {
+        learnerName: "Year 7 learner",
+        yearGroup: "Year 7",
+        topic: "fractions",
+        questionCount: 1
+      },
+      sourceName: source.name
+    });
+
+    const result = await runtime.generateInitialAssessment({
+      context,
+      learningLoopId: "loop_text_fallback",
+      source,
+      sourceItems: [sourceItem]
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      return;
+    }
+
+    expect(result.value.items).toHaveLength(1);
+  });
+
+  it("normalizes wrapped assessment payloads that only provide questions plus artifact content", async () => {
+    const runtime = new RelayAgentRuntime({
+      binding: createRelayBinding(),
+      fetcher: (async (_input, init) => {
+        const url =
+          typeof _input === "string"
+            ? _input
+            : _input instanceof URL
+              ? _input.toString()
+              : _input.url;
+        const method = init?.method ?? "GET";
+
+        if (url.includes("/v1/messages/") && url.endsWith("/inspection") && method === "GET") {
+          return new Response(
+            JSON.stringify({
+              artifacts: [{ id: "relay_artifact_assessment_compat" }],
+              resultEvents: [{ artifactId: "relay_artifact_assessment_compat" }],
+              task: {
+                id: "relay_task_assessment_compat"
+              }
+            }),
+            {
+              status: 200,
+              headers: { "content-type": "application/json" }
+            }
+          );
+        }
+
+        return new Response(
+          JSON.stringify({
+            conversationId: "relay_conversation_assessment_compat",
+            messageId: "relay_message_assessment_compat",
+            responseMessageId: "relay_response_assessment_compat",
+            taskId: "relay_task_assessment_compat",
+            responseContent: {
+              type: "json",
+              value: {
+                assessment: {
+                  questions: [
+                    {
+                      id: "question_1",
+                      question: "What should you remember about Core facts?",
+                      difficulty: "easy"
+                    }
+                  ],
+                  artifactContent: {
+                    topic: "fractions",
+                    questionCount: 1,
+                    instructions: "Answer the question from memory.",
+                    items: [
+                      {
+                        id: "question_1",
+                        prompt: "What should you remember about Core facts?",
+                        difficulty: "easy"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" }
+          }
+        );
+      }) as typeof fetch
+    });
+
+    const source = MasterDataSource.create("Fractions Bank", []);
+    const sourceItem = MasterDataItem.create(source.id, {
+      topic: "fractions",
+      prompt: "Simplify 6/8.",
+      canonicalAnswer: "three quarters",
+      visibleMaterial: "Fractions can describe equal parts of a whole.",
+      structured: {
+        subject: "Mathematics",
+        yearGroup: "Year 7",
+        topic: "fractions",
+        subtopic: "Core facts",
+        itemType: "fact",
+        content: "Fractions can describe equal parts of a whole.",
+        sourceRef: "fractions > fallback-1"
+      }
+    });
+    const context = InitialAssessmentContext.create({
+      command: {
+        learnerName: "Year 7 learner",
+        yearGroup: "Year 7",
+        topic: "fractions",
+        questionCount: 1
+      },
+      sourceName: source.name
+    });
+
+    const result = await runtime.generateInitialAssessment({
+      context,
+      learningLoopId: "loop_assessment_compat",
+      source,
+      sourceItems: [sourceItem]
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      return;
+    }
+
+    expect(result.value.items).toHaveLength(1);
+    expect(result.value.items[0]).toMatchObject({
+      prompt: "What should you remember about Core facts?",
+      canonicalAnswer: "Fractions can describe equal parts of a whole.",
+      sourceMasterDataItemId: sourceItem.id
+    });
+    expect(result.value.artifactContent).toMatchObject({
+      topic: "fractions",
+      questionCount: 1
+    });
+  });
+
   it("routes Relay capabilities through the configured runtime profile", async () => {
     const calls: string[] = [];
     const runtime = new RelayAgentRuntime({
@@ -769,7 +1113,7 @@ describe("Agent runtime contract", () => {
     });
     expect(practice.ok).toBe(true);
 
-    expect(calls).toEqual(["assessor", "reviewer", "planner", "coach"]);
+    expect(calls).toEqual(["@assessor", "@reviewer", "@planner", "@coach"]);
   });
 
   it("sends structured Relay messages and reuses one internal conversation per learning loop", async () => {
@@ -798,11 +1142,28 @@ describe("Agent runtime contract", () => {
             : _input instanceof URL
               ? _input.toString()
               : _input.url;
+        const method = init?.method ?? "GET";
+        if (url.includes("/v1/messages/") && url.endsWith("/inspection") && method === "GET") {
+          return new Response(
+            JSON.stringify({
+              artifacts: [{ id: "relay_artifact_loop_1" }],
+              resultEvents: [{ artifactId: "relay_artifact_loop_1" }],
+              task: {
+                id: "relay_task_loop_1"
+              }
+            }),
+            {
+              status: 200,
+              headers: { "content-type": "application/json" }
+            }
+          );
+        }
+
         expect(url.endsWith("/v1/messages")).toBe(true);
 
         const body = JSON.parse(String(init?.body ?? "{}")) as {
           conversationId?: string;
-          content: { text: string };
+          content: { previewText?: string; text?: string };
           idempotencyKey?: string;
           metadata?: Record<string, unknown>;
           to?: string;
@@ -811,10 +1172,10 @@ describe("Agent runtime contract", () => {
           conversationId: body.conversationId,
           idempotencyKey: body.idempotencyKey,
           metadata: body.metadata,
-          messageText: body.content.text,
+          messageText: body.content.text ?? body.content.previewText,
           to: body.to
         });
-        const relayRequest = parseRelayConversationRequest(body.content.text);
+        const relayRequest = parseRelayConversationRequest(body.content);
 
         return new Response(
           JSON.stringify({
@@ -822,9 +1183,9 @@ describe("Agent runtime contract", () => {
             messageId: `relay_message_${relayRequest.operation}`,
             responseMessageId: `relay_response_${relayRequest.operation}`,
             taskId: `relay_task_${relayRequest.operation}`,
-            responseText: JSON.stringify({
+            responseContent: {
               result: buildRelayResult(relayRequest.operation, relayRequest.payload)
-            })
+            }
           }),
           {
             status: 200,
@@ -900,8 +1261,8 @@ describe("Agent runtime contract", () => {
     }
 
     expect(calls).toHaveLength(2);
-    expect(calls[0]?.to).toBe("tutor");
-    expect(calls[1]?.to).toBe("tutor");
+    expect(calls[0]?.to).toBe("@tutor");
+    expect(calls[1]?.to).toBe("@tutor");
     expect(calls[0]?.conversationId).toBeUndefined();
     expect(calls[1]?.conversationId).toBe("relay_conversation_loop_1");
     expect(calls[0]?.messageText).not.toContain("@supervisor");
@@ -1133,11 +1494,34 @@ describe("Agent runtime contract", () => {
       agentRuntime: new RelayAgentRuntime({
         binding: createRelayBinding(),
         fetcher: (async (_input, init) => {
+          const url =
+            typeof _input === "string"
+              ? _input
+              : _input instanceof URL
+                ? _input.toString()
+                : _input.url;
+          const method = init?.method ?? "GET";
+          if (url.includes("/v1/messages/") && url.endsWith("/inspection") && method === "GET") {
+            return new Response(
+              JSON.stringify({
+                artifacts: [{ id: "relay_artifact_resume" }],
+                resultEvents: [{ artifactId: "relay_artifact_resume" }],
+                task: {
+                  id: "relay_task_resume"
+                }
+              }),
+              {
+                status: 200,
+                headers: { "content-type": "application/json" }
+              }
+            );
+          }
+
           relayMessageCalls += 1;
           const body = JSON.parse(String(init?.body ?? "{}")) as {
-            content: { text: string };
+            content: { previewText?: string; text?: string };
           };
-          const relayRequest = parseRelayConversationRequest(body.content.text);
+          const relayRequest = parseRelayConversationRequest(body.content);
 
           return new Response(
             JSON.stringify({
@@ -1145,9 +1529,9 @@ describe("Agent runtime contract", () => {
               messageId: `relay_message_${relayRequest.operation}`,
               responseMessageId: `relay_response_${relayRequest.operation}`,
               taskId: `relay_task_${relayRequest.operation}`,
-              responseText: JSON.stringify({
+              responseContent: {
                 result: buildRelayResult(relayRequest.operation, relayRequest.payload)
-              })
+              }
             }),
             {
               status: 200,
@@ -1187,7 +1571,7 @@ describe("Agent runtime contract", () => {
         }
       });
       expect(assessmentResponse.statusCode).toBe(201);
-      expect(relayMessageCalls).toBe(1);
+      expect(relayMessageCalls).toBe(2);
 
       const loopId = assessmentResponse.json().learningLoop.id as string;
       const resumeResponse = await server.inject({
@@ -1195,7 +1579,7 @@ describe("Agent runtime contract", () => {
         url: `/v1/learning-loops/${loopId}`
       });
       expect(resumeResponse.statusCode).toBe(200);
-      expect(relayMessageCalls).toBe(1);
+      expect(relayMessageCalls).toBe(2);
     } finally {
       await server.close();
     }

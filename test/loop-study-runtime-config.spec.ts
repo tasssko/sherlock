@@ -21,17 +21,18 @@ describe("Loop study runtime config", () => {
     expect(config.compatibilityWarnings).toEqual([]);
     expect(config.relay?.baseUrl).toBe("http://relay.test");
     expect(config.relay?.profile.workspace.id).toBe("workspace_study_advisor");
+    expect(config.relay?.profile.capabilityRoutes.interpretMasterData.agentHandle).toBe("tutor");
     expect(config.relay?.profile.capabilityRoutes.generateInitialAssessment.agentHandle).toBe(
-      "supervisor"
+      "tutor"
     );
     expect(config.relay?.profile.capabilityRoutes.evaluateAssessmentAttempt.agentHandle).toBe(
-      "supervisor"
+      "tutor"
     );
     expect(config.relay?.profile.capabilityRoutes.generateStudyPlan.agentHandle).toBe(
-      "supervisor"
+      "tutor"
     );
     expect(config.relay?.profile.capabilityRoutes.generatePracticeActivity.agentHandle).toBe(
-      "supervisor"
+      "tutor"
     );
   });
 
@@ -94,6 +95,7 @@ describe("Loop study runtime config", () => {
             defaultAgentHandle: "custom-supervisor",
             defaultControllerId: "controller.custom",
             capabilityRoutes: {
+              interpretMasterData: { agentHandle: "custom-supervisor" },
               generateInitialAssessment: { agentHandle: "custom-supervisor" },
               evaluateAssessmentAttempt: { agentHandle: "custom-reviewer" },
               evaluateActiveReviewSession: { agentHandle: "custom-reviewer" },

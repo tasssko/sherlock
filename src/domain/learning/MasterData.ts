@@ -2,6 +2,9 @@ import type { MasterDataItemId, MasterDataSourceId } from "../primitives/ids.js"
 import { createMasterDataItemId, createMasterDataSourceId } from "../primitives/ids.js";
 import type { StructuredMasterDataFields } from "../../modules/masterData/structuredRevision.js";
 import { decodeStructuredMetadataKeywords } from "../../modules/masterData/structuredRevision.js";
+import type {
+  MasterDataInterpretationCandidate
+} from "../../modules/masterData/MasterDataInterpretation.js";
 
 export interface PublicMasterDataItemSnapshot {
   id: MasterDataItemId;
@@ -11,6 +14,19 @@ export interface PublicMasterDataItemSnapshot {
   canonicalAnswer: string;
   visibleMaterial: string;
   keywords: readonly string[];
+}
+
+export interface RuntimeMasterDataItemPayload extends PublicMasterDataItemSnapshot {
+  content?: string;
+  date?: string;
+  definition?: string;
+  itemType?: StructuredMasterDataFields["itemType"];
+  person?: string;
+  sourceRef?: string;
+  subject?: string;
+  subtopic?: string;
+  term?: string;
+  yearGroup?: string;
 }
 
 export interface MasterDataItemSnapshot extends PublicMasterDataItemSnapshot {
@@ -137,8 +153,20 @@ export class MasterDataItem {
     };
   }
 
-  toRuntimePayload(): PublicMasterDataItemSnapshot {
-    return this.toPublicSnapshot();
+  toRuntimePayload(): RuntimeMasterDataItemPayload {
+    return {
+      ...this.toPublicSnapshot(),
+      itemType: this.snapshot.structured?.itemType,
+      subject: this.snapshot.structured?.subject,
+      yearGroup: this.snapshot.structured?.yearGroup,
+      subtopic: this.snapshot.structured?.subtopic,
+      content: this.snapshot.structured?.content,
+      sourceRef: this.snapshot.structured?.sourceRef,
+      term: this.snapshot.structured?.term,
+      definition: this.snapshot.structured?.definition,
+      date: this.snapshot.structured?.date,
+      person: this.snapshot.structured?.person
+    };
   }
 
   toSnapshot(): MasterDataItemSnapshot {
@@ -157,22 +185,71 @@ export interface MasterDataSourceSnapshot {
   itemIds: readonly MasterDataItemId[];
 }
 
-export class MasterDataSource {
-  private constructor(private readonly snapshot: MasterDataSourceSnapshot) {}
+export interface MasterDataSourceInputHint {
+  subject?: string;
+  topic?: string;
+}
 
-  static create(name: string, itemIds: readonly MasterDataItemId[]): MasterDataSource {
+export interface MasterDataSourceInternalSnapshot extends MasterDataSourceSnapshot {
+  acceptedInterpretation?: MasterDataInterpretationCandidate;
+  contentType?: string;
+  learnerYearGroup?: string;
+  rawSourceContent?: string;
+  userHints?: MasterDataSourceInputHint;
+}
+
+export class MasterDataSource {
+  private constructor(private readonly snapshot: MasterDataSourceInternalSnapshot) {}
+
+  static create(
+    name: string,
+    itemIds: readonly MasterDataItemId[],
+    details: {
+      acceptedInterpretation?: MasterDataInterpretationCandidate;
+      contentType?: string;
+      learnerYearGroup?: string;
+      rawSourceContent?: string;
+      userHints?: MasterDataSourceInputHint;
+    } = {}
+  ): MasterDataSource {
     return new MasterDataSource({
       id: createMasterDataSourceId(),
       name,
       uploadedAt: new Date().toISOString(),
-      itemIds: [...itemIds]
+      itemIds: [...itemIds],
+      rawSourceContent: details.rawSourceContent,
+      contentType: details.contentType,
+      learnerYearGroup: details.learnerYearGroup,
+      userHints: details.userHints ? { ...details.userHints } : undefined,
+      acceptedInterpretation: details.acceptedInterpretation
     });
   }
 
-  static rehydrate(snapshot: MasterDataSourceSnapshot): MasterDataSource {
+  static rehydrate(snapshot: MasterDataSourceInternalSnapshot): MasterDataSource {
     return new MasterDataSource({
       ...snapshot,
-      itemIds: [...snapshot.itemIds]
+      itemIds: [...snapshot.itemIds],
+      userHints: snapshot.userHints ? { ...snapshot.userHints } : undefined,
+      acceptedInterpretation: snapshot.acceptedInterpretation
+        ? {
+            ...snapshot.acceptedInterpretation,
+            subtopics: [...snapshot.acceptedInterpretation.subtopics],
+            keyPeople: [...snapshot.acceptedInterpretation.keyPeople],
+            keyTerms: [...snapshot.acceptedInterpretation.keyTerms],
+            importantDates: [...snapshot.acceptedInterpretation.importantDates],
+            processes: [...snapshot.acceptedInterpretation.processes],
+            learningObjectives: snapshot.acceptedInterpretation.learningObjectives.map(
+              (objective) => ({
+                ...objective,
+                sourceRefs: [...objective.sourceRefs]
+              })
+            ),
+            sourceMap: snapshot.acceptedInterpretation.sourceMap.map((entry) => ({
+              ...entry
+            })),
+            items: snapshot.acceptedInterpretation.items.map((item) => ({ ...item }))
+          }
+        : undefined
     });
   }
 
@@ -188,10 +265,62 @@ export class MasterDataSource {
     return this.snapshot.itemIds;
   }
 
+  get rawSourceContent(): string | undefined {
+    return this.snapshot.rawSourceContent;
+  }
+
+  get contentType(): string | undefined {
+    return this.snapshot.contentType;
+  }
+
+  get learnerYearGroup(): string | undefined {
+    return this.snapshot.learnerYearGroup;
+  }
+
+  get userHints(): MasterDataSourceInputHint | undefined {
+    return this.snapshot.userHints;
+  }
+
+  get acceptedInterpretation(): MasterDataInterpretationCandidate | undefined {
+    return this.snapshot.acceptedInterpretation;
+  }
+
   toSnapshot(): MasterDataSourceSnapshot {
     return {
-      ...this.snapshot,
+      id: this.snapshot.id,
+      name: this.snapshot.name,
+      uploadedAt: this.snapshot.uploadedAt,
       itemIds: [...this.snapshot.itemIds]
+    };
+  }
+
+  toStorageSnapshot(): MasterDataSourceInternalSnapshot {
+    return {
+      ...this.toSnapshot(),
+      rawSourceContent: this.snapshot.rawSourceContent,
+      contentType: this.snapshot.contentType,
+      learnerYearGroup: this.snapshot.learnerYearGroup,
+      userHints: this.snapshot.userHints ? { ...this.snapshot.userHints } : undefined,
+      acceptedInterpretation: this.snapshot.acceptedInterpretation
+        ? {
+            ...this.snapshot.acceptedInterpretation,
+            subtopics: [...this.snapshot.acceptedInterpretation.subtopics],
+            keyPeople: [...this.snapshot.acceptedInterpretation.keyPeople],
+            keyTerms: [...this.snapshot.acceptedInterpretation.keyTerms],
+            importantDates: [...this.snapshot.acceptedInterpretation.importantDates],
+            processes: [...this.snapshot.acceptedInterpretation.processes],
+            learningObjectives: this.snapshot.acceptedInterpretation.learningObjectives.map(
+              (objective) => ({
+                ...objective,
+                sourceRefs: [...objective.sourceRefs]
+              })
+            ),
+            sourceMap: this.snapshot.acceptedInterpretation.sourceMap.map((entry) => ({
+              ...entry
+            })),
+            items: this.snapshot.acceptedInterpretation.items.map((item) => ({ ...item }))
+          }
+        : undefined
     };
   }
 }

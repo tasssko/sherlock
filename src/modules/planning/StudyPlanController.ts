@@ -32,7 +32,14 @@ export class StudyPlanController
     const existingRecord = this.repository.findRecord(repositoryKey);
     const aggregate = await this.service.run({
       command,
-      existingRecord
+      existingRecord,
+      materialInterpretations: existingRecord?.learningLoops
+        .find((candidate) => candidate.topic === (command.focusTopics[0] ?? "study"))
+        ?.toSnapshot()
+        .sourceIds.flatMap((sourceId) => {
+          const source = this.repository.findMasterDataSourcesByIds([sourceId])[0];
+          return source?.acceptedInterpretation ? [source.acceptedInterpretation] : [];
+        })
     });
 
     if (!aggregate.ok) {

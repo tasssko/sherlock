@@ -5,6 +5,7 @@ export type RuntimeProvider = "fixture" | "relay";
 export type RuntimeOperation =
   | "evaluateActiveReviewSession"
   | "evaluateAssessmentAttempt"
+  | "interpretMasterData"
   | "generateInitialAssessment"
   | "generatePracticeActivity"
   | "generateStudyPlan";

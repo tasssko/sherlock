@@ -102,8 +102,7 @@ describe("Runtime boot logging", () => {
           bindings: {
             runtimeMode: "relay",
             relayWorkspaceId: "workspace_study_advisor",
-            defaultAgentHandle: "supervisor",
-            controllerId: "controller.supervisor_workplan"
+            defaultAgentHandle: "tutor"
           },
           message:
             "loop.study booted with RelayAgentRuntime and provisioned the Relay workspace binding."
