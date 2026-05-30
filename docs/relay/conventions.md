@@ -12,5 +12,5 @@ Sherlock adopts the following conventions from the observed Relay project:
 Sherlock-specific interpretation:
 
 - `src/domain/primitives` contains durable concepts such as `Task`, `WorkPlan`, and `Artifact`.
-- `src/modules/planning` contains a thin controller plus explicit workflow, repository, and projector collaborators instead of a monolithic orchestration method.
+- `src/modules/planning` contains a thin controller plus explicit generation-service, repository, and projector collaborators instead of a monolithic orchestration method.
 - The Vite UI renders the workspace snapshot returned by the controller rather than reconstructing domain state in React.

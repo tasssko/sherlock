@@ -1,6 +1,6 @@
 # Sherlock Architecture
 
-Sherlock follows a primitives-first shape.
+Sherlock follows a primitives-first shape with `LearningLoop` as the primary aggregate.
 
 ```text
 HTTP Route -> Controller -> Domain Primitives -> Structured Response
@@ -20,10 +20,14 @@ Current layers:
   - narrow collaborators for source selection, quality validation, assembly, and projection
 - `src/modules/learning`
   - learning-loop selection and loop-oriented coordination helpers
+- `src/modules/practice`
+  - practice-activity generation and completion
+  - flashcard-set assembly from diagnosed gaps and master data
+  - completion-driven mastery updates
 - `src/modules/planning`
   - study-plan vertical slice
   - thin controller
-  - small workflow collaborators
+  - small generation-service collaborators
   - plan adaptation from diagnosed gaps and mastery state
   - repository port
   - response projection
@@ -31,15 +35,15 @@ Current layers:
   - core domain concepts and lifecycle rules
   - centralized event recording
 - `src/domain/learning`
-  - learning-loop, assessment, attempt, evaluation, knowledge-gap, mastery-profile, and master-data types
+  - learning-loop, assessment, attempt, evaluation, knowledge-gap, mastery-profile, master-data, and practice-activity types
 - `src/app/ui`
   - Vite/React client split into request forms, API adapters, and read-only snapshot views
 
-Persistence now uses a small SQLite-backed repository that stores learner workspace records and uploaded master data separately. The controllers still depend on the same narrow repository interface rather than direct SQL.
+Persistence now uses a narrow learning-loop repository contract plus a SQLite adapter. Controllers and application services depend on the repository interface rather than direct SQL.
 
 ## Intentionally Deferred
 
-- practice and reassessment slices beyond the initial loop stages
+- reassessment slices beyond the current practice stage
 - richer repository boundaries for tasks, artifacts, and work plans
 - richer artifact revision lifecycle and review semantics
 - an event-store or event-sourcing boundary

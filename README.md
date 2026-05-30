@@ -38,7 +38,13 @@ The Vite app runs on `http://127.0.0.1:5173`.
 
 `POST /v1/assessments/attempts` records learner responses, evaluates them, identifies knowledge gaps, and updates mastery tracking.
 
-`POST /v1/study-plans` creates or attaches to a learner learning loop and returns:
+`POST /v1/learning-loops/:id/practice-activities` generates a `flashcard_set` practice activity for an existing diagnosed learning loop.
+
+`GET /v1/learning-loops/:id/practice-activities` lists the practice activities already attached to that loop.
+
+`POST /v1/practice-activities/:id/completions` records completion evidence and updates mastery from practice, not from diagnostic assessment alone.
+
+`POST /v1/study-plans` adapts a study plan from an existing diagnosed learning loop and returns:
 
 - workspace metadata
 - learning loop metadata
@@ -49,6 +55,8 @@ The Vite app runs on `http://127.0.0.1:5173`.
 - diagnosed knowledge gaps
 - mastery profile when available
 - events
+
+The learning loop is the primary aggregate. Study plans are loop outputs, not the root object.
 
 ## Verification
 
@@ -66,7 +74,7 @@ pnpm build
 
 ## Intentionally Deferred
 
-- reassessment and practice-specific vertical slices beyond the initial assessment
+- reassessment slices beyond the current assessment, planning, and practice flow
 - richer repository boundaries for tasks, artifacts, and work plans
 - richer artifact lifecycle and revision workflow
 - an event-store boundary
