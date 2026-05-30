@@ -1,0 +1,42 @@
+{
+  "id": "custom-profile",
+  "workspace": {
+    "id": "workspace_study_advisor",
+    "name": "Study Advisor Workspace",
+    "slug": "study-advisor-workspace"
+  },
+  "defaultAgentHandle": "supervisor",
+  "defaultControllerId": "controller.supervisor_workplan",
+  "capabilityRoutes": {
+    "generateInitialAssessment": {
+      "agentHandle": "supervisor"
+    },
+    "evaluateAssessmentAttempt": {
+      "agentHandle": "supervisor"
+    },
+    "evaluateActiveReviewSession": {
+      "agentHandle": "supervisor"
+    },
+    "generateStudyPlan": {
+      "agentHandle": "supervisor"
+    },
+    "generatePracticeActivity": {
+      "agentHandle": "supervisor"
+    }
+  },
+  "requiredAgentHandles": [
+    "supervisor"
+  ],
+  "requiredControllerIds": [
+    "controller.supervisor_workplan"
+  ],
+  "requiredSkillIds": [],
+  "operatingInstructions": [],
+  "defaultPolicy": {
+    "requireApprovalForSideEffects": [],
+    "allowTaskCreationFromConversation": true,
+    "allowMessageOnlyResponses": true,
+    "allowSupervisorDelegation": true,
+    "allowAgentToAgentDelegation": false
+  }
+}

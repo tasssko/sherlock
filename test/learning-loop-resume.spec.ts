@@ -35,7 +35,7 @@ describe("Learning loop resume", () => {
         method: "POST",
         url: "/v1/assessments/initial",
         payload: {
-          learnerName: "Ava Patel",
+          learnerName: "Adam Skoudros",
           yearGroup: "Year 7",
           topic: "fractions",
           questionCount: 2
@@ -81,7 +81,7 @@ describe("Learning loop resume", () => {
         method: "POST",
         url: "/v1/study-plans",
         payload: {
-          learnerName: "Ava Patel",
+          learnerName: "Adam Skoudros",
           yearGroup: "Year 7",
           objective: "Build a steady weekly plan for fractions, forces, and French vocabulary.",
           focusTopics: ["fractions"],

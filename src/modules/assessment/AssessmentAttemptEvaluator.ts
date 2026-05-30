@@ -8,12 +8,14 @@ import type { LearningLoop } from "../../domain/learning/LearningLoop.js";
 import type { AgentRuntime } from "../runtime/AgentRuntime.js";
 import { FixtureAgentRuntime } from "../runtime/FixtureAgentRuntime.js";
 import type { RuntimeTraceSeed } from "../runtime/RuntimeTrace.js";
+import type { RuntimeConversationBinding } from "../runtime/RuntimeConversationBinding.js";
 
 export interface AssessmentAttemptEvaluation {
   attempt: Attempt;
   evaluation: Evaluation;
   knowledgeGaps: readonly KnowledgeGap[];
   learningLoop: LearningLoop;
+  runtimeConversationBinding?: RuntimeConversationBinding;
   runtimeTrace?: RuntimeTraceSeed;
 }
 
@@ -25,6 +27,7 @@ export class AssessmentAttemptEvaluator {
     command: SubmitAssessmentAttemptCommand;
     events: DomainEventRecorder;
     learningLoop: LearningLoop;
+    runtimeConversationBinding?: RuntimeConversationBinding;
   }): Promise<Result<AssessmentAttemptEvaluation>> {
     const assessmentSnapshot = input.assessment.toSnapshot();
     const attempt = Attempt.create(
@@ -39,7 +42,9 @@ export class AssessmentAttemptEvaluator {
         topic: assessmentSnapshot.topic
       },
       contextTopic: assessmentSnapshot.topic,
-      responses: input.command.responses
+      learningLoopId: input.learningLoop.id,
+      responses: input.command.responses,
+      runtimeConversationBinding: input.runtimeConversationBinding
     });
     if (!runtimeEvaluation.ok) {
       return runtimeEvaluation;
@@ -92,6 +97,7 @@ export class AssessmentAttemptEvaluator {
       evaluation,
       knowledgeGaps,
       learningLoop,
+      runtimeConversationBinding: runtimeEvaluation.value.runtimeConversationBinding,
       runtimeTrace: runtimeEvaluation.value.runtimeTrace
     });
   }

@@ -15,7 +15,16 @@ import type {
 import type { CreateStudyPlanCommand, StudyPlanResponse } from "../../../domain/study/StudyPlanning.js";
 
 async function requestJson<TResponse>(url: string, init: RequestInit): Promise<TResponse> {
-  const response = await fetch(url, init);
+  let response: Response;
+
+  try {
+    response = await fetch(url, init);
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Unknown network failure.";
+    throw new Error(`Could not reach the loop.study API at ${url}. ${message}`);
+  }
+
   const payload = (await response.json()) as { error?: string };
 
   if (!response.ok) {

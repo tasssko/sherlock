@@ -38,6 +38,10 @@ function normalize(value: string): string {
 }
 
 function pickSourceSentence(item: MasterDataItem): string {
+  if (item.content) {
+    return item.content;
+  }
+
   const sentences = item.visibleMaterial
     .split(/(?<=[.!?])\s+/)
     .map((sentence) => sentence.trim())
@@ -51,8 +55,33 @@ function pickSourceSentence(item: MasterDataItem): string {
   );
 }
 
+function buildAssessmentPrompt(item: MasterDataItem): string {
+  return item.sourceRef ? `${item.prompt} [Source: ${item.sourceRef}]` : item.prompt;
+}
+
+function buildPracticeFront(item: MasterDataItem): string {
+  if (item.itemType === "person" && item.person) {
+    return `Who was ${item.person}?`;
+  }
+
+  if (item.itemType === "key_term" && item.term) {
+    return `What does ${item.term} mean?`;
+  }
+
+  if (item.itemType === "date" && item.date) {
+    return `What happened in ${item.date}?`;
+  }
+
+  return item.prompt;
+}
+
+function buildPracticeBack(item: MasterDataItem): string {
+  return item.content ?? item.definition ?? item.canonicalAnswer;
+}
+
 export class FixtureAgentRuntime implements AgentRuntime {
   evaluateActiveReviewSession(input: {
+    learningLoopId: string;
     practiceItems: readonly PracticeItem[];
     responses: readonly PracticeItemResponse[];
   }): Result<ActiveReviewEvaluationCandidate> {
@@ -90,6 +119,7 @@ export class FixtureAgentRuntime implements AgentRuntime {
       topic: string;
     };
     contextTopic: string;
+    learningLoopId: string;
     responses: readonly {
       answer: string;
       itemId: string;
@@ -143,13 +173,14 @@ export class FixtureAgentRuntime implements AgentRuntime {
 
   generateInitialAssessment(input: {
     context: InitialAssessmentContext;
+    learningLoopId: string;
     source: MasterDataSource;
     sourceItems: readonly MasterDataItem[];
   }): Result<InitialAssessmentGenerationCandidate> {
     const items = input.sourceItems.map((item, index) => ({
       id: `assessment_item_${index + 1}`,
       topic: item.topic,
-      prompt: item.prompt,
+      prompt: buildAssessmentPrompt(item),
       canonicalAnswer: item.canonicalAnswer,
       visibleMaterial: item.visibleMaterial,
       difficulty: difficultyScale[index] ?? "stretch",
@@ -178,6 +209,7 @@ export class FixtureAgentRuntime implements AgentRuntime {
 
   generatePracticeActivity(input: {
     context: PracticeActivityContext;
+    learningLoopId: string;
     selections: readonly {
       gap: {
         description: string;
@@ -188,8 +220,8 @@ export class FixtureAgentRuntime implements AgentRuntime {
   }): Result<PracticeActivityGenerationCandidate> {
     const cards = input.selections.map(({ gap, item }, index) => ({
       id: `flashcard_${index + 1}`,
-      front: item.prompt,
-      back: item.canonicalAnswer,
+      front: buildPracticeFront(item),
+      back: buildPracticeBack(item),
       topic: item.topic,
       knowledgeGapId: gap.id as never,
       learningObjective: gap.description,
@@ -212,6 +244,7 @@ export class FixtureAgentRuntime implements AgentRuntime {
 
   generateStudyPlan(input: {
     context: StudyPlanningContext;
+    learningLoopId: string;
   }): Result<StudyPlanGenerationCandidate> {
     const activeDays = input.context.schedule
       .filter((entry) => entry.minutes > 0)

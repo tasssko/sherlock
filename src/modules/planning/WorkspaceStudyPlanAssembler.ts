@@ -14,6 +14,7 @@ import { ok, type Result } from "../../domain/primitives/result.js";
 import type { StudyPlanAggregate } from "./StudyPlanProjector.js";
 import type { Agent } from "../../domain/primitives/Agent.js";
 import type { RuntimeTraceSeed } from "../runtime/RuntimeTrace.js";
+import type { RuntimeConversationBinding } from "../runtime/RuntimeConversationBinding.js";
 
 export interface WorkspaceStudyPlanAssemblerInput {
   agent: Agent;
@@ -24,6 +25,7 @@ export interface WorkspaceStudyPlanAssemblerInput {
   learningLoop: LearningLoop;
   masteryProfile?: MasteryProfile;
   parentTask: Task;
+  runtimeConversationBinding?: RuntimeConversationBinding;
   runtimeTrace?: RuntimeTraceSeed;
   workPlan: WorkPlan;
   workspace: Workspace;
@@ -67,6 +69,7 @@ export class WorkspaceStudyPlanAssembler {
       knowledgeGaps: input.knowledgeGaps,
       masteryProfile: input.masteryProfile,
       events: allEvents,
+      runtimeConversationBinding: input.runtimeConversationBinding,
       runtimeTrace: input.runtimeTrace
     });
   }

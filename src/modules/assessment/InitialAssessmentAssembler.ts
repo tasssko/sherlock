@@ -16,11 +16,13 @@ import { AssessmentQualityValidator } from "./AssessmentQualityValidator.js";
 import type { AgentRuntime } from "../runtime/AgentRuntime.js";
 import { FixtureAgentRuntime } from "../runtime/FixtureAgentRuntime.js";
 import type { RuntimeTraceSeed } from "../runtime/RuntimeTrace.js";
+import type { RuntimeConversationBinding } from "../runtime/RuntimeConversationBinding.js";
 
 export interface InitialAssessmentAssembly {
   agent: ReturnType<typeof createInitialAssessmentAgent>;
   assessment: Assessment;
   artifact: Artifact<AssessmentArtifactContent, "assessment">;
+  runtimeConversationBinding?: RuntimeConversationBinding;
   runtimeTrace?: RuntimeTraceSeed;
 }
 
@@ -34,6 +36,7 @@ export class InitialAssessmentAssembler {
     context: InitialAssessmentContext;
     events: DomainEventRecorder;
     learningLoop: LearningLoop;
+    runtimeConversationBinding?: RuntimeConversationBinding;
     source: MasterDataSource;
     sourceItems: readonly MasterDataItem[];
     task: Task;
@@ -41,8 +44,10 @@ export class InitialAssessmentAssembler {
   }): Promise<Result<InitialAssessmentAssembly>> {
     const generated = await this.runtime.generateInitialAssessment({
       context: input.context,
+      learningLoopId: input.learningLoop.id,
       source: input.source,
-      sourceItems: input.sourceItems
+      sourceItems: input.sourceItems,
+      runtimeConversationBinding: input.runtimeConversationBinding
     });
     if (!generated.ok) {
       return generated;
@@ -103,6 +108,7 @@ export class InitialAssessmentAssembler {
       agent,
       assessment: assessment.attachArtifact(artifact.id, input.events),
       artifact,
+      runtimeConversationBinding: generated.value.runtimeConversationBinding,
       runtimeTrace: generated.value.runtimeTrace
     });
   }

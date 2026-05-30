@@ -34,6 +34,29 @@ const validMasterDataBody = {
 };
 
 describe("Route boundaries", () => {
+  it("answers browser preflight requests for the API routes", async () => {
+    const server = await createServer();
+
+    try {
+      const response = await server.inject({
+        method: "OPTIONS",
+        url: "/v1/assessments/initial",
+        headers: {
+          origin: "http://127.0.0.1:4174",
+          "access-control-request-method": "POST",
+          "access-control-request-headers": "content-type"
+        }
+      });
+
+      expect(response.statusCode).toBe(204);
+      expect(response.headers["access-control-allow-origin"]).toBe("http://127.0.0.1:4174");
+      expect(response.headers["access-control-allow-methods"]).toContain("POST");
+      expect(response.headers["access-control-allow-headers"]).toContain("content-type");
+    } finally {
+      await server.close();
+    }
+  });
+
   it("maps study-plan validation errors to 400", async () => {
     const server = await createServer();
 

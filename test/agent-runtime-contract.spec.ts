@@ -8,6 +8,13 @@ import { SqliteLearningLoopRepository } from "../src/modules/planning/SqliteLear
 import { PracticeActivityController } from "../src/modules/practice/PracticeActivityController.js";
 import { FixtureAgentRuntime } from "../src/modules/runtime/FixtureAgentRuntime.js";
 import { RelayAgentRuntime } from "../src/modules/runtime/RelayAgentRuntime.js";
+import {
+  createLoopStudyRelayRuntimeProfile,
+  defaultLoopStudyRelayRuntimeProfile,
+  type LoopStudyRelayCapability,
+  type LoopStudyRelayCapabilityRoute
+} from "../src/modules/runtime/LoopStudyRelayRuntimeProfile.js";
+import { RelayWorkspaceBinding } from "../src/modules/runtime/RelayWorkspaceBinding.js";
 import { deriveGoldenPathStep } from "../src/app/ui/deriveGoldenPathStep.js";
 import { InitialAssessmentContext, PracticeActivityContext, StudyPlanningContext } from "../src/domain/primitives/Context.js";
 import { MasterDataItem, MasterDataSource } from "../src/domain/learning/MasterData.js";
@@ -25,10 +32,27 @@ function normalize(value: string): string {
     .trim();
 }
 
+function parseRelayConversationRequest(messageText: string): {
+  operation: string;
+  payload: any;
+  stage: string;
+} {
+  const marker = "Structured context:\n";
+  const index = messageText.indexOf(marker);
+  const payloadText =
+    index >= 0 ? messageText.slice(index + marker.length) : "{}";
+
+  return JSON.parse(payloadText) as {
+    operation: string;
+    payload: any;
+    stage: string;
+  };
+}
+
 function createRelayFetchStub(): typeof fetch {
   return (async (_input, init) => {
     const url = typeof _input === "string" ? _input : _input instanceof URL ? _input.toString() : _input.url;
-    if (!url.endsWith("/v1/tasks")) {
+    if (!url.endsWith("/v1/messages")) {
       return new Response(JSON.stringify({ error: "not found" }), {
         status: 404,
         headers: { "content-type": "application/json" }
@@ -36,14 +60,15 @@ function createRelayFetchStub(): typeof fetch {
     }
 
     const body = JSON.parse(String(init?.body ?? "{}")) as {
-      message: string;
+      content: {
+        text: string;
+      };
     };
-    const [, payloadLine = "{}"] = body.message.split("\n");
-    const relayRequest = JSON.parse(payloadLine) as {
-      operation: string;
-      payload: any;
-    };
+    const relayRequest = parseRelayConversationRequest(body.content.text);
     const responseEnvelope = {
+      conversationId: `relay_conversation_${relayRequest.payload.context?.learningLoopId ?? relayRequest.operation}`,
+      messageId: `relay_message_${relayRequest.operation}`,
+      responseMessageId: `relay_response_${relayRequest.operation}`,
       taskId: `relay_task_${relayRequest.operation}`,
       workPlanId:
         relayRequest.operation === "generateStudyPlan" ? "relay_workplan_1" : undefined,
@@ -57,6 +82,81 @@ function createRelayFetchStub(): typeof fetch {
       headers: { "content-type": "application/json" }
     });
   }) as typeof fetch;
+}
+
+function createRelayHandleCaptureStub(calls: string[]): typeof fetch {
+  return (async (_input, init) => {
+    const body = JSON.parse(String(init?.body ?? "{}")) as {
+      conversationId?: string;
+      content: {
+        text: string;
+      };
+      metadata?: Record<string, unknown>;
+      to?: string;
+    };
+    calls.push(String(body.to ?? ""));
+    const relayRequest = parseRelayConversationRequest(body.content.text);
+
+    return new Response(
+      JSON.stringify({
+        conversationId: body.conversationId ?? "relay_conversation_test",
+        messageId: `relay_message_${relayRequest.operation}`,
+        responseMessageId: `relay_response_${relayRequest.operation}`,
+        taskId: "relay_task_test",
+        responseText: JSON.stringify({
+          result: buildRelayResult(relayRequest.operation, relayRequest.payload)
+        })
+      }),
+      {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      }
+    );
+  }) as typeof fetch;
+}
+
+function createRelayBinding(overrides: {
+  baseUrl?: string;
+  capabilityRoutes?: Partial<Record<LoopStudyRelayCapability, LoopStudyRelayCapabilityRoute>>;
+  defaultAgentHandle?: string;
+  defaultControllerId?: string;
+  workspaceId?: string;
+} = {}): RelayWorkspaceBinding {
+  return RelayWorkspaceBinding.create({
+    baseUrl: overrides.baseUrl ?? "http://relay.test",
+    profile: createLoopStudyRelayRuntimeProfile({
+      ...defaultLoopStudyRelayRuntimeProfile,
+      workspace: {
+        ...defaultLoopStudyRelayRuntimeProfile.workspace,
+        id:
+          overrides.workspaceId ?? defaultLoopStudyRelayRuntimeProfile.workspace.id
+      },
+      defaultAgentHandle:
+        overrides.defaultAgentHandle ??
+        defaultLoopStudyRelayRuntimeProfile.defaultAgentHandle,
+      defaultControllerId:
+        overrides.defaultControllerId ??
+        defaultLoopStudyRelayRuntimeProfile.defaultControllerId,
+      capabilityRoutes: {
+        ...defaultLoopStudyRelayRuntimeProfile.capabilityRoutes,
+        ...overrides.capabilityRoutes
+      },
+      requiredAgentHandles: [...defaultLoopStudyRelayRuntimeProfile.requiredAgentHandles],
+      requiredControllerIds: [
+        ...defaultLoopStudyRelayRuntimeProfile.requiredControllerIds
+      ],
+      requiredSkillIds: [...defaultLoopStudyRelayRuntimeProfile.requiredSkillIds],
+      operatingInstructions: [
+        ...defaultLoopStudyRelayRuntimeProfile.operatingInstructions
+      ],
+      defaultPolicy: {
+        ...defaultLoopStudyRelayRuntimeProfile.defaultPolicy,
+        requireApprovalForSideEffects: [
+          ...defaultLoopStudyRelayRuntimeProfile.defaultPolicy.requireApprovalForSideEffects
+        ]
+      }
+    })
+  });
 }
 
 function buildRelayResult(operation: string, payload: any): unknown {
@@ -330,8 +430,7 @@ describe("Agent runtime contract", () => {
   it("lets FixtureAgentRuntime and RelayAgentRuntime satisfy the same AgentRuntime contract", async () => {
     const fixtureRuntime = new FixtureAgentRuntime();
     const relayRuntime = new RelayAgentRuntime({
-      baseUrl: "http://relay.test",
-      workspaceId: "workspace_demo",
+      binding: createRelayBinding(),
       fetcher: createRelayFetchStub()
     });
 
@@ -407,11 +506,13 @@ describe("Agent runtime contract", () => {
 
     const fixtureAssessment = await fixtureRuntime.generateInitialAssessment({
       context: assessmentContext,
+      learningLoopId: loop.id,
       source,
       sourceItems: [sourceItem]
     });
     const relayAssessment = await relayRuntime.generateInitialAssessment({
       context: assessmentContext,
+      learningLoopId: loop.id,
       source,
       sourceItems: [sourceItem]
     });
@@ -430,6 +531,7 @@ describe("Agent runtime contract", () => {
         items: fixtureAssessment.value.items
       },
       contextTopic: "fractions",
+      learningLoopId: loop.id,
       responses: [
         {
           itemId: fixtureAssessment.value.items[0].id,
@@ -443,6 +545,7 @@ describe("Agent runtime contract", () => {
         items: fixtureAssessment.value.items
       },
       contextTopic: "fractions",
+      learningLoopId: loop.id,
       responses: [
         {
           itemId: fixtureAssessment.value.items[0].id,
@@ -455,12 +558,19 @@ describe("Agent runtime contract", () => {
     if (!fixtureEvaluation.ok || !relayEvaluation.ok) {
       return;
     }
-    expect(Object.keys(relayEvaluation.value).filter((key) => key !== "runtimeTrace").sort()).toEqual(
-      Object.keys(fixtureEvaluation.value).filter((key) => key !== "runtimeTrace").sort()
+    expect(
+      Object.keys(relayEvaluation.value)
+        .filter((key) => key !== "runtimeTrace" && key !== "runtimeConversationBinding")
+        .sort()
+    ).toEqual(
+      Object.keys(fixtureEvaluation.value)
+        .filter((key) => key !== "runtimeTrace" && key !== "runtimeConversationBinding")
+        .sort()
     );
 
     const fixturePractice = await fixtureRuntime.generatePracticeActivity({
       context: practiceContext,
+      learningLoopId: loop.id,
       selections: [
         {
           gap: {
@@ -473,6 +583,7 @@ describe("Agent runtime contract", () => {
     });
     const relayPractice = await relayRuntime.generatePracticeActivity({
       context: practiceContext,
+      learningLoopId: loop.id,
       selections: [
         {
           gap: {
@@ -493,10 +604,12 @@ describe("Agent runtime contract", () => {
     );
 
     const fixtureStudyPlan = await fixtureRuntime.generateStudyPlan({
-      context: studyContext
+      context: studyContext,
+      learningLoopId: loop.id
     });
     const relayStudyPlan = await relayRuntime.generateStudyPlan({
-      context: studyContext
+      context: studyContext,
+      learningLoopId: loop.id
     });
     expect(fixtureStudyPlan.ok).toBe(true);
     expect(relayStudyPlan.ok).toBe(true);
@@ -508,12 +621,319 @@ describe("Agent runtime contract", () => {
     );
   });
 
+  it("routes Relay capabilities through the configured runtime profile", async () => {
+    const calls: string[] = [];
+    const runtime = new RelayAgentRuntime({
+      binding: createRelayBinding({
+        defaultAgentHandle: "writer",
+        capabilityRoutes: {
+          generateInitialAssessment: {
+            agentHandle: "assessor"
+          },
+          evaluateAssessmentAttempt: {
+            agentHandle: "reviewer"
+          },
+          generateStudyPlan: {
+            agentHandle: "planner"
+          },
+          generatePracticeActivity: {
+            agentHandle: "coach"
+          }
+        }
+      }),
+      fetcher: createRelayHandleCaptureStub(calls)
+    });
+    const source = MasterDataSource.create("Fractions Bank", []);
+    const sourceItem = MasterDataItem.create(source.id, {
+      topic: "fractions",
+      prompt: "Simplify 6/8.",
+      canonicalAnswer: "three quarters",
+      visibleMaterial: "Fractions can describe equal parts of a whole."
+    });
+    const context = InitialAssessmentContext.create({
+      command: {
+        learnerName: "Year 7 learner",
+        yearGroup: "Year 7",
+        topic: "fractions",
+        questionCount: 1
+      },
+      sourceName: source.name
+    });
+
+    const workspace = Workspace.create({
+      title: "Study Workspace",
+      learner: {
+        name: "Year 7 learner",
+        yearGroup: "Year 7",
+        availableMinutesByDay: {}
+      },
+      activeObjective: "Build secure understanding in fractions."
+    });
+    const events = createDomainEventRecorder(workspace.id);
+    const loop = LearningLoop.create(
+      {
+        workspaceId: workspace.id,
+        objective: "Build secure understanding in fractions.",
+        topic: "fractions"
+      },
+      events
+    );
+    const gap = KnowledgeGap.create({
+      learningLoopId: loop.id,
+      topic: "fractions",
+      description: "Needs support with equivalent fractions.",
+      evidence: "Missed a diagnostic item.",
+      severity: "high"
+    });
+    const practiceContext = PracticeActivityContext.create({
+      command: {
+        learningLoopId: loop.id,
+        kind: "flashcard_set",
+        cardCount: 1
+      },
+      diagnosedGaps: [gap.toSnapshot().description],
+      learnerName: "Year 7 learner",
+      learningLoopId: loop.id,
+      sourceNames: [source.name],
+      topic: "fractions",
+      yearGroup: "Year 7"
+    });
+    const studyContext = StudyPlanningContext.fromCommand({
+      learnerName: "Year 7 learner",
+      yearGroup: "Year 7",
+      objective: "Build a weekly plan.",
+      focusTopics: ["fractions"],
+      availableMinutesByDay: {
+        Monday: 30,
+        Tuesday: 30,
+        Wednesday: 30,
+        Thursday: 30,
+        Friday: 30,
+        Saturday: 60,
+        Sunday: 0
+      }
+    });
+
+    const assessment = await runtime.generateInitialAssessment({
+      context,
+      learningLoopId: loop.id,
+      source,
+      sourceItems: [sourceItem]
+    });
+    expect(assessment.ok).toBe(true);
+
+    const evaluation = await runtime.evaluateAssessmentAttempt({
+      assessment: {
+        topic: "fractions",
+        items: [
+          {
+            id: "assessment_item_1",
+            topic: "fractions",
+            prompt: "Simplify 6/8.",
+            canonicalAnswer: "three quarters",
+            visibleMaterial: "Fractions can describe equal parts of a whole.",
+            difficulty: "easy",
+            sourceMasterDataItemId: "master_data_1"
+          }
+        ]
+      },
+      contextTopic: "fractions",
+      learningLoopId: loop.id,
+      responses: [
+        {
+          itemId: "assessment_item_1",
+          answer: "incorrect response"
+        }
+      ]
+    });
+    expect(evaluation.ok).toBe(true);
+
+    const studyPlan = await runtime.generateStudyPlan({
+      context: studyContext,
+      learningLoopId: loop.id
+    });
+    expect(studyPlan.ok).toBe(true);
+
+    const practice = await runtime.generatePracticeActivity({
+      context: practiceContext,
+      learningLoopId: loop.id,
+      selections: [
+        {
+          gap: {
+            id: gap.id,
+            description: gap.toSnapshot().description
+          },
+          item: sourceItem
+        }
+      ]
+    });
+    expect(practice.ok).toBe(true);
+
+    expect(calls).toEqual(["assessor", "reviewer", "planner", "coach"]);
+  });
+
+  it("sends structured Relay messages and reuses one internal conversation per learning loop", async () => {
+    const calls: {
+      conversationId?: string;
+      idempotencyKey?: string;
+      metadata?: Record<string, unknown>;
+      messageText: string;
+      to?: string;
+    }[] = [];
+    const runtime = new RelayAgentRuntime({
+      binding: createRelayBinding({
+        capabilityRoutes: {
+          generateInitialAssessment: {
+            agentHandle: "tutor"
+          },
+          evaluateAssessmentAttempt: {
+            agentHandle: "tutor"
+          }
+        }
+      }),
+      fetcher: (async (_input, init) => {
+        const url =
+          typeof _input === "string"
+            ? _input
+            : _input instanceof URL
+              ? _input.toString()
+              : _input.url;
+        expect(url.endsWith("/v1/messages")).toBe(true);
+
+        const body = JSON.parse(String(init?.body ?? "{}")) as {
+          conversationId?: string;
+          content: { text: string };
+          idempotencyKey?: string;
+          metadata?: Record<string, unknown>;
+          to?: string;
+        };
+        calls.push({
+          conversationId: body.conversationId,
+          idempotencyKey: body.idempotencyKey,
+          metadata: body.metadata,
+          messageText: body.content.text,
+          to: body.to
+        });
+        const relayRequest = parseRelayConversationRequest(body.content.text);
+
+        return new Response(
+          JSON.stringify({
+            conversationId: body.conversationId ?? "relay_conversation_loop_1",
+            messageId: `relay_message_${relayRequest.operation}`,
+            responseMessageId: `relay_response_${relayRequest.operation}`,
+            taskId: `relay_task_${relayRequest.operation}`,
+            responseText: JSON.stringify({
+              result: buildRelayResult(relayRequest.operation, relayRequest.payload)
+            })
+          }),
+          {
+            status: 200,
+            headers: { "content-type": "application/json" }
+          }
+        );
+      }) as typeof fetch
+    });
+    const source = MasterDataSource.create("Fractions Bank", []);
+    const sourceItem = MasterDataItem.create(source.id, {
+      topic: "fractions",
+      prompt: "Simplify 6/8.",
+      canonicalAnswer: "three quarters",
+      visibleMaterial: "Fractions can describe equal parts of a whole."
+    });
+    const workspace = Workspace.create({
+      title: "Study Workspace",
+      learner: {
+        name: "Year 7 learner",
+        yearGroup: "Year 7",
+        availableMinutesByDay: {}
+      },
+      activeObjective: "Build secure understanding in fractions."
+    });
+    const events = createDomainEventRecorder(workspace.id);
+    const loop = LearningLoop.create(
+      {
+        workspaceId: workspace.id,
+        objective: "Build secure understanding in fractions.",
+        topic: "fractions"
+      },
+      events
+    );
+    const assessmentContext = InitialAssessmentContext.create({
+      command: {
+        learnerName: "Year 7 learner",
+        yearGroup: "Year 7",
+        topic: "fractions",
+        questionCount: 1
+      },
+      sourceName: source.name
+    });
+
+    const assessment = await runtime.generateInitialAssessment({
+      context: assessmentContext,
+      learningLoopId: loop.id,
+      source,
+      sourceItems: [sourceItem]
+    });
+    expect(assessment.ok).toBe(true);
+    if (!assessment.ok) {
+      return;
+    }
+
+    const evaluation = await runtime.evaluateAssessmentAttempt({
+      assessment: {
+        topic: "fractions",
+        items: assessment.value.items
+      },
+      contextTopic: "fractions",
+      learningLoopId: loop.id,
+      responses: [
+        {
+          itemId: assessment.value.items[0].id,
+          answer: "incorrect response"
+        }
+      ],
+      runtimeConversationBinding: assessment.value.runtimeConversationBinding
+    });
+    expect(evaluation.ok).toBe(true);
+    if (!evaluation.ok) {
+      return;
+    }
+
+    expect(calls).toHaveLength(2);
+    expect(calls[0]?.to).toBe("tutor");
+    expect(calls[1]?.to).toBe("tutor");
+    expect(calls[0]?.conversationId).toBeUndefined();
+    expect(calls[1]?.conversationId).toBe("relay_conversation_loop_1");
+    expect(calls[0]?.messageText).not.toContain("@supervisor");
+    expect(calls[0]?.metadata).toMatchObject({
+      product: "loop.study",
+      learningLoopId: loop.id,
+      stage: "diagnosis",
+      operation: "generateInitialAssessment",
+      expectedOutputSchema: "InitialAssessmentGenerationCandidate"
+    });
+    expect(calls[1]?.metadata).toMatchObject({
+      product: "loop.study",
+      learningLoopId: loop.id,
+      stage: "diagnosis",
+      operation: "evaluateAssessmentAttempt",
+      expectedOutputSchema: "AssessmentAttemptEvaluationCandidate"
+    });
+    expect(calls[0]?.idempotencyKey).toContain(`loop-study:${loop.id}:generateInitialAssessment:`);
+    expect(calls[1]?.idempotencyKey).toContain(`loop-study:${loop.id}:evaluateAssessmentAttempt:`);
+    expect(assessment.value.runtimeConversationBinding?.relayConversationId).toBe(
+      "relay_conversation_loop_1"
+    );
+    expect(evaluation.value.runtimeConversationBinding?.relayConversationId).toBe(
+      "relay_conversation_loop_1"
+    );
+  });
+
   it("keeps the loop.study API shape stable when swapping from fixture runtime to RelayAgentRuntime", async () => {
     const fixtureServer = await createServer();
     const relayServer = await createServer({
       agentRuntime: new RelayAgentRuntime({
-        baseUrl: "http://relay.test",
-        workspaceId: "workspace_demo",
+        binding: createRelayBinding(),
         fetcher: createRelayFetchStub()
       })
     });
@@ -601,8 +1021,7 @@ describe("Agent runtime contract", () => {
   it("stores Relay ids only as internal runtime trace metadata", async () => {
     const repository = new SqliteLearningLoopRepository(":memory:");
     const runtime = new RelayAgentRuntime({
-      baseUrl: "http://relay.test",
-      workspaceId: "workspace_demo",
+      binding: createRelayBinding(),
       fetcher: createRelayFetchStub()
     });
     const uploadController = new MasterDataUploadController(repository);
@@ -678,6 +1097,7 @@ describe("Agent runtime contract", () => {
 
     const record = repository.findRecordByLearningLoopId(assessment.value.learningLoop.id as never);
     expect(record?.record.runtimeTraces).toHaveLength(4);
+    expect(record?.record.runtimeConversationBindings).toHaveLength(1);
     expect(record?.record.runtimeTraces.map((trace) => trace.toSnapshot())).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -686,6 +1106,9 @@ describe("Agent runtime contract", () => {
             status: "succeeded"
           }),
           relayTask: expect.objectContaining({
+            relayConversationId: expect.stringContaining("relay_conversation_"),
+            relayMessageId: expect.stringContaining("relay_message_"),
+            relayResponseMessageId: expect.stringContaining("relay_response_"),
             relayTaskId: expect.stringContaining("relay_task_")
           })
         })
@@ -699,14 +1122,89 @@ describe("Agent runtime contract", () => {
       studyPlan: studyPlan.value
     });
     expect(learnerFacingPayload).not.toContain("relay_task_");
+    expect(learnerFacingPayload).not.toContain("relay_conversation_");
     expect(learnerFacingPayload).not.toContain("relay_workplan_");
+    expect(learnerFacingPayload).not.toContain("workspace_study_advisor");
+  });
+
+  it("reconstructs resume from loop.study projection without reading Relay directly", async () => {
+    let relayMessageCalls = 0;
+    const server = await createServer({
+      agentRuntime: new RelayAgentRuntime({
+        binding: createRelayBinding(),
+        fetcher: (async (_input, init) => {
+          relayMessageCalls += 1;
+          const body = JSON.parse(String(init?.body ?? "{}")) as {
+            content: { text: string };
+          };
+          const relayRequest = parseRelayConversationRequest(body.content.text);
+
+          return new Response(
+            JSON.stringify({
+              conversationId: "relay_conversation_resume",
+              messageId: `relay_message_${relayRequest.operation}`,
+              responseMessageId: `relay_response_${relayRequest.operation}`,
+              taskId: `relay_task_${relayRequest.operation}`,
+              responseText: JSON.stringify({
+                result: buildRelayResult(relayRequest.operation, relayRequest.payload)
+              })
+            }),
+            {
+              status: 200,
+              headers: { "content-type": "application/json" }
+            }
+          );
+        }) as typeof fetch
+      })
+    });
+
+    try {
+      const uploadResponse = await server.inject({
+        method: "POST",
+        url: "/v1/master-data",
+        payload: {
+          sourceName: "Year 7 Fractions Bank",
+          items: [
+            {
+              topic: "fractions",
+              prompt: "Simplify 6/8.",
+              canonicalAnswer: "three quarters",
+              visibleMaterial: "Fractions can describe equal parts of a whole."
+            }
+          ]
+        }
+      });
+      expect(uploadResponse.statusCode).toBe(201);
+
+      const assessmentResponse = await server.inject({
+        method: "POST",
+        url: "/v1/assessments/initial",
+        payload: {
+          learnerName: "Year 7 learner",
+          yearGroup: "Year 7",
+          topic: "fractions",
+          questionCount: 1
+        }
+      });
+      expect(assessmentResponse.statusCode).toBe(201);
+      expect(relayMessageCalls).toBe(1);
+
+      const loopId = assessmentResponse.json().learningLoop.id as string;
+      const resumeResponse = await server.inject({
+        method: "GET",
+        url: `/v1/learning-loops/${loopId}`
+      });
+      expect(resumeResponse.statusCode).toBe(200);
+      expect(relayMessageCalls).toBe(1);
+    } finally {
+      await server.close();
+    }
   });
 
   it("returns a learner-safe error and preserves loop state when runtime generation fails", async () => {
     const repository = new SqliteLearningLoopRepository(":memory:");
     const runtime = new RelayAgentRuntime({
-      baseUrl: "http://relay.test",
-      workspaceId: "workspace_demo",
+      binding: createRelayBinding(),
       fetcher: (async () =>
         new Response(JSON.stringify({ error: "boom" }), {
           status: 500,
@@ -769,8 +1267,11 @@ describe("Agent runtime contract", () => {
     }
 
     expect(result.error.code).toBe("STATE_CONFLICT");
-    expect(result.error.message).toBe("The practice service could not generate an activity right now.");
-    expect(result.error.message).not.toContain("Relay");
+    expect(result.error.message).toContain(
+      "The practice service could not generate an activity right now."
+    );
+    expect(result.error.message).toContain("Upstream request failed with status 500.");
+    expect(result.error.message).toContain("boom");
     expect(result.error.message).not.toContain("/v1/tasks");
 
     const after = repository.findRecordByLearningLoopId(assessment.value.learningLoop.id as never);

@@ -31,7 +31,11 @@ describe("Frontend runtime boundary", () => {
     expect(contents).not.toContain("RelayAgentRuntime");
     expect(contents).not.toContain("/v1/tasks");
     expect(contents).not.toContain("/inspection");
+    expect(contents).not.toContain("relayConversationId");
     expect(contents).not.toContain("relayTaskId");
     expect(contents).not.toContain("relayWorkPlanId");
+    expect(contents).not.toContain("RELAY_WORKSPACE_ID");
+    expect(contents).not.toContain("LOOP_STUDY_RELAY_WORKSPACE_ID");
+    expect(contents).not.toContain("workspace_study_advisor");
   });
 });

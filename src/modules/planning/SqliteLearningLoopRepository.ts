@@ -11,6 +11,7 @@ import {
 import { MasterDataItem, MasterDataSource } from "../../domain/learning/MasterData.js";
 import { PracticeActivity } from "../../domain/learning/PracticeActivity.js";
 import { RuntimeTrace } from "../runtime/RuntimeTrace.js";
+import { RuntimeConversationBinding } from "../runtime/RuntimeConversationBinding.js";
 import type { Artifact, ArtifactType } from "../../domain/primitives/Artifact.js";
 import { Artifact as ArtifactEntity } from "../../domain/primitives/Artifact.js";
 import type { DomainEvent } from "../../domain/primitives/Event.js";
@@ -132,6 +133,16 @@ export class SqliteLearningLoopRepository implements LearningLoopRepository {
       .prepare("select snapshot from runtime_traces where learner_key = ? order by rowid asc")
       .all(key.value)
       .map((row) => RuntimeTrace.rehydrate(parseSnapshot((row as { snapshot: string }).snapshot)));
+    const runtimeConversationBindings = this.database
+      .prepare(
+        "select snapshot from runtime_conversation_bindings where learner_key = ? order by rowid asc"
+      )
+      .all(key.value)
+      .map((row) =>
+        RuntimeConversationBinding.rehydrate(
+          parseSnapshot((row as { snapshot: string }).snapshot)
+        )
+      );
 
     return createLearningLoopRecord({
       workspace,
@@ -147,6 +158,7 @@ export class SqliteLearningLoopRepository implements LearningLoopRepository {
       masteryProfiles,
       practiceActivities,
       activeReviewSessions,
+      runtimeConversationBindings,
       runtimeTraces
     });
   }
@@ -268,7 +280,7 @@ export class SqliteLearningLoopRepository implements LearningLoopRepository {
 
     return {
       source: source.toSnapshot(),
-      items: items.map((item) => item.toSnapshot())
+      items: items.map((item) => item.toPublicSnapshot())
     };
   }
 
@@ -288,6 +300,9 @@ export class SqliteLearningLoopRepository implements LearningLoopRepository {
       this.database.prepare("delete from mastery_profiles where learner_key = ?").run(key.value);
       this.database.prepare("delete from practice_activities where learner_key = ?").run(key.value);
       this.database.prepare("delete from active_review_sessions where learner_key = ?").run(key.value);
+      this.database
+        .prepare("delete from runtime_conversation_bindings where learner_key = ?")
+        .run(key.value);
       this.database.prepare("delete from runtime_traces where learner_key = ?").run(key.value);
 
       this.database
@@ -404,6 +419,20 @@ export class SqliteLearningLoopRepository implements LearningLoopRepository {
         insertRuntimeTrace.run(snapshot.id, key.value, JSON.stringify(snapshot));
       }
 
+      const insertRuntimeConversationBinding = this.database.prepare(
+        `insert into runtime_conversation_bindings
+         (learning_loop_id, learner_key, snapshot)
+         values (?, ?, ?)`
+      );
+      for (const binding of record.runtimeConversationBindings) {
+        const snapshot = binding.toSnapshot();
+        insertRuntimeConversationBinding.run(
+          snapshot.learningLoopId,
+          key.value,
+          JSON.stringify(snapshot)
+        );
+      }
+
       this.database.exec("commit");
     } catch (error) {
       this.database.exec("rollback");
@@ -479,6 +508,11 @@ export class SqliteLearningLoopRepository implements LearningLoopRepository {
         learner_key text not null,
         practice_activity_id text not null,
         learning_loop_id text not null,
+        snapshot text not null
+      );
+      create table if not exists runtime_conversation_bindings (
+        learning_loop_id text primary key,
+        learner_key text not null,
         snapshot text not null
       );
       create table if not exists runtime_traces (

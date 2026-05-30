@@ -7,53 +7,73 @@ import type {
   PracticeActivityGenerationCandidate,
   StudyPlanGenerationCandidate
 } from "./AgentRuntime.js";
-import type { InitialAssessmentContext, PracticeActivityContext, StudyPlanningContext } from "../../domain/primitives/Context.js";
-import type { MasterDataItem, MasterDataSource } from "../../domain/learning/MasterData.js";
+import type {
+  InitialAssessmentContext,
+  PracticeActivityContext,
+  StudyPlanningContext
+} from "../../domain/primitives/Context.js";
+import type {
+  MasterDataItem,
+  MasterDataSource
+} from "../../domain/learning/MasterData.js";
 import type { AssessmentItem } from "../../domain/learning/Assessment.js";
-import type { PracticeItem, PracticeItemResponse } from "../../domain/learning/PracticeActivity.js";
+import type {
+  PracticeItem,
+  PracticeItemResponse
+} from "../../domain/learning/PracticeActivity.js";
+import type { LoopStudyRelayCapability } from "./LoopStudyRelayRuntimeProfile.js";
 import type { RuntimeTraceSeed } from "./RuntimeTrace.js";
-
-interface RelayTaskCreateResponse {
-  responseText?: string;
-  taskId?: string;
-  workPlanId?: string;
-}
-
-interface RelayTaskInspectionResponse {
-  responseText?: string;
-  task?: {
-    id?: string;
-  };
-}
+import { RelayWorkspaceBinding } from "./RelayWorkspaceBinding.js";
+import { LoopStudyRelayConversationAdapter } from "./LoopStudyRelayConversationAdapter.js";
+import type { RuntimeConversationBinding } from "./RuntimeConversationBinding.js";
 
 interface RelayStructuredResult<TValue> {
   result: TValue;
 }
 
 interface RelayRequestOptions {
-  baseUrl: string;
+  binding: RelayWorkspaceBinding;
   createdBy?: string;
   fetcher?: typeof fetch;
-  workspaceId: string;
 }
 
 export class RelayAgentRuntime implements AgentRuntime {
-  private readonly createdBy: string;
-  private readonly fetcher: typeof fetch;
+  private readonly adapter: LoopStudyRelayConversationAdapter;
 
   constructor(private readonly options: RelayRequestOptions) {
-    this.createdBy = options.createdBy ?? "loop.study";
-    this.fetcher = options.fetcher ?? fetch;
+    this.adapter = new LoopStudyRelayConversationAdapter({
+      binding: options.binding,
+      createdBy: options.createdBy,
+      fetcher: options.fetcher
+    });
+  }
+
+  describeBinding(): {
+    controllerId?: string;
+    defaultAgentHandle: string;
+    workspaceId: string;
+  } {
+    return {
+      workspaceId: this.options.binding.workspaceId,
+      defaultAgentHandle: this.options.binding.defaultAgentHandle,
+      controllerId: this.options.binding.controllerId
+    };
   }
 
   evaluateActiveReviewSession(input: {
+    learningLoopId: string;
     practiceItems: readonly PracticeItem[];
     responses: readonly PracticeItemResponse[];
+    runtimeConversationBinding?: RuntimeConversationBinding;
   }): Promise<Result<ActiveReviewEvaluationCandidate>> {
-    return this.runStructuredTask<ActiveReviewEvaluationCandidate>({
-      assignedAgentHandle: "reviewer",
-      failureMessage: "The review service could not evaluate this practice evidence right now.",
+    return this.runStructuredConversation<ActiveReviewEvaluationCandidate>({
+      failureMessage:
+        "The review service could not evaluate this practice evidence right now.",
+      capability: "evaluateActiveReviewSession",
+      expectedOutputSchema: "ActiveReviewEvaluationCandidate",
       operation: "evaluateActiveReviewSession",
+      learningLoopId: input.learningLoopId,
+      runtimeConversationBinding: input.runtimeConversationBinding,
       payload: {
         practiceItems: input.practiceItems,
         responses: input.responses
@@ -67,15 +87,21 @@ export class RelayAgentRuntime implements AgentRuntime {
       topic: string;
     };
     contextTopic: string;
+    learningLoopId: string;
     responses: readonly {
       answer: string;
       itemId: string;
     }[];
+    runtimeConversationBinding?: RuntimeConversationBinding;
   }): Promise<Result<AssessmentAttemptEvaluationCandidate>> {
-    return this.runStructuredTask<AssessmentAttemptEvaluationCandidate>({
-      assignedAgentHandle: "reviewer",
-      failureMessage: "The assessment service could not evaluate this attempt right now.",
+    return this.runStructuredConversation<AssessmentAttemptEvaluationCandidate>({
+      failureMessage:
+        "The assessment service could not evaluate this attempt right now.",
+      capability: "evaluateAssessmentAttempt",
+      expectedOutputSchema: "AssessmentAttemptEvaluationCandidate",
       operation: "evaluateAssessmentAttempt",
+      learningLoopId: input.learningLoopId,
+      runtimeConversationBinding: input.runtimeConversationBinding,
       payload: {
         assessment: input.assessment,
         contextTopic: input.contextTopic,
@@ -86,23 +112,30 @@ export class RelayAgentRuntime implements AgentRuntime {
 
   generateInitialAssessment(input: {
     context: InitialAssessmentContext;
+    learningLoopId: string;
     source: MasterDataSource;
     sourceItems: readonly MasterDataItem[];
+    runtimeConversationBinding?: RuntimeConversationBinding;
   }): Promise<Result<InitialAssessmentGenerationCandidate>> {
-    return this.runStructuredTask<InitialAssessmentGenerationCandidate>({
-      assignedAgentHandle: "curriculum-mapper",
-      failureMessage: "The assessment service could not generate a diagnostic right now.",
+    return this.runStructuredConversation<InitialAssessmentGenerationCandidate>({
+      failureMessage:
+        "The assessment service could not generate a diagnostic right now.",
+      capability: "generateInitialAssessment",
+      expectedOutputSchema: "InitialAssessmentGenerationCandidate",
       operation: "generateInitialAssessment",
+      learningLoopId: input.learningLoopId,
+      runtimeConversationBinding: input.runtimeConversationBinding,
       payload: {
         context: input.context.toSnapshot(),
         source: input.source.toSnapshot(),
-        sourceItems: input.sourceItems.map((item) => item.toSnapshot())
+        sourceItems: input.sourceItems.map((item) => item.toRuntimePayload())
       }
     });
   }
 
   generatePracticeActivity(input: {
     context: PracticeActivityContext;
+    learningLoopId: string;
     selections: readonly {
       gap: {
         description: string;
@@ -110,16 +143,21 @@ export class RelayAgentRuntime implements AgentRuntime {
       };
       item: MasterDataItem;
     }[];
+    runtimeConversationBinding?: RuntimeConversationBinding;
   }): Promise<Result<PracticeActivityGenerationCandidate>> {
-    return this.runStructuredTask<PracticeActivityGenerationCandidate>({
-      assignedAgentHandle: "tutor",
-      failureMessage: "The practice service could not generate an activity right now.",
+    return this.runStructuredConversation<PracticeActivityGenerationCandidate>({
+      failureMessage:
+        "The practice service could not generate an activity right now.",
+      capability: "generatePracticeActivity",
+      expectedOutputSchema: "PracticeActivityGenerationCandidate",
       operation: "generatePracticeActivity",
+      learningLoopId: input.learningLoopId,
+      runtimeConversationBinding: input.runtimeConversationBinding,
       payload: {
         context: input.context.toSnapshot(),
         selections: input.selections.map((selection) => ({
           gap: selection.gap,
-          item: selection.item.toSnapshot()
+          item: selection.item.toRuntimePayload()
         }))
       }
     });
@@ -127,106 +165,100 @@ export class RelayAgentRuntime implements AgentRuntime {
 
   generateStudyPlan(input: {
     context: StudyPlanningContext;
+    learningLoopId: string;
+    runtimeConversationBinding?: RuntimeConversationBinding;
   }): Promise<Result<StudyPlanGenerationCandidate>> {
-    return this.runStructuredTask<StudyPlanGenerationCandidate>({
-      assignedAgentHandle: "study-planner",
-      failureMessage: "The planning service could not generate a study plan right now.",
+    return this.runStructuredConversation<StudyPlanGenerationCandidate>({
+      failureMessage:
+        "The planning service could not generate a study plan right now.",
+      capability: "generateStudyPlan",
+      expectedOutputSchema: "StudyPlanGenerationCandidate",
       operation: "generateStudyPlan",
+      learningLoopId: input.learningLoopId,
+      runtimeConversationBinding: input.runtimeConversationBinding,
       payload: {
         context: input.context.toSnapshot()
       }
     });
   }
 
-  private async runStructuredTask<TValue extends { runtimeTrace?: RuntimeTraceSeed }>(input: {
-    assignedAgentHandle: string;
+  private async runStructuredConversation<
+    TValue extends {
+      runtimeConversationBinding?: RuntimeConversationBinding;
+      runtimeTrace?: RuntimeTraceSeed;
+    }
+  >(input: {
+    capability: LoopStudyRelayCapability;
+    expectedOutputSchema: string;
     failureMessage: string;
+    learningLoopId: string;
     operation: string;
     payload: unknown;
+    runtimeConversationBinding?: RuntimeConversationBinding;
   }): Promise<Result<TValue>> {
-    const taskResponse = await this.postJson<RelayTaskCreateResponse>("/v1/tasks", {
-      workspaceId: this.options.workspaceId,
-      source: "api",
-      createdBy: this.createdBy,
-      assignedAgentHandle: input.assignedAgentHandle,
-      message: [
-        "Return valid JSON only.",
-        JSON.stringify({
-          operation: input.operation,
-          payload: input.payload
-        })
-      ].join("\n"),
-      metadata: {
-        controllerId: "controller.supervisor_workplan",
-        runtimeOperation: input.operation
-      }
+    const stage = stageForOperation(input.operation);
+    const idempotencyKey = createRelayIdempotencyKey({
+      learningLoopId: input.learningLoopId,
+      operation: input.operation,
+      payload: input.payload
     });
-    if (!taskResponse.ok) {
-      return err({
-        code: "STATE_CONFLICT",
-        message: input.failureMessage
-      });
+    const relayTurn = await this.adapter.sendStructuredTurn({
+      capability: input.capability,
+      expectedOutputSchema: input.expectedOutputSchema,
+      idempotencyKey,
+      learningLoopId: input.learningLoopId as never,
+      messageText: buildConversationMessage({
+        operation: input.operation,
+        payload: input.payload,
+        expectedOutputSchema: input.expectedOutputSchema,
+        stage
+      }),
+      metadata: {
+        stage,
+        operation: input.operation
+      },
+      runtimeConversationBinding: input.runtimeConversationBinding
+    });
+    if (!relayTurn.ok) {
+      return this.runtimeFailure(input.failureMessage, relayTurn.error.message);
     }
 
-    let responseText = taskResponse.value.responseText;
-    if (!responseText) {
-      const inspection = await this.fetchInspectionResponse(taskResponse.value.taskId);
-      if (!inspection.ok) {
-        return err({
-          code: "STATE_CONFLICT",
-          message: input.failureMessage
-        });
-      }
-      responseText = inspection.value;
-    }
-    const parsed = this.parseStructuredResult<TValue>(responseText);
+    const parsed = this.parseStructuredResult<TValue>(relayTurn.value.responseText);
     if (!parsed.ok) {
-      return err({
-        code: "STATE_CONFLICT",
-        message: input.failureMessage
-      });
+      return this.runtimeFailure(input.failureMessage, parsed.error.message);
     }
 
     const runtimeTrace: RuntimeTraceSeed = {
       provider: "relay",
       operation: input.operation as RuntimeTraceSeed["operation"],
       relayTask: {
-        relayArtifactIds: [],
-        relayTaskId: taskResponse.value.taskId,
-        relayWorkPlanId: taskResponse.value.workPlanId
+        relayArtifactIds: relayTurn.value.correlation.relayArtifactIds,
+        relayConversationId: relayTurn.value.correlation.relayConversationId,
+        relayMessageId: relayTurn.value.correlation.relayMessageId,
+        relayResponseMessageId: relayTurn.value.correlation.relayResponseMessageId,
+        relayTaskId: relayTurn.value.correlation.relayTaskId,
+        relayWorkPlanId: relayTurn.value.correlation.relayWorkPlanId
       },
       runtimeArtifacts: []
     };
 
     return ok({
       ...parsed.value,
+      runtimeConversationBinding: relayTurn.value.binding,
       runtimeTrace
     });
   }
 
-  private async fetchInspectionResponse(taskId: string | undefined): Promise<Result<string>> {
-    if (!taskId) {
-      return err({
-        code: "STATE_CONFLICT",
-        message: "Relay runtime did not return a task id or inline response."
-      });
-    }
+  private runtimeFailure<TValue>(
+    failureMessage: string,
+    detail: string
+  ): Result<TValue> {
+    const suffix = detail.trim() ? ` ${detail.trim()}` : "";
 
-    const inspection = await this.getJson<RelayTaskInspectionResponse>(
-      `/v1/tasks/${taskId}/inspection`
-    );
-    if (!inspection.ok) {
-      return inspection;
-    }
-
-    if (!inspection.value.responseText) {
-      return err({
-        code: "STATE_CONFLICT",
-        message: `Relay task inspection for ${taskId} did not include responseText.`
-      });
-    }
-
-    return ok(inspection.value.responseText);
+    return err({
+      code: "STATE_CONFLICT",
+      message: `${failureMessage}${suffix}`
+    });
   }
 
   private parseStructuredResult<TValue>(responseText: string): Result<TValue> {
@@ -235,7 +267,8 @@ export class RelayAgentRuntime implements AgentRuntime {
       if (!parsed || typeof parsed !== "object" || !("result" in parsed)) {
         return err({
           code: "STATE_CONFLICT",
-          message: "Relay runtime response did not contain a structured result envelope."
+          message:
+            "Relay runtime response did not contain a structured result envelope."
         });
       }
 
@@ -247,33 +280,59 @@ export class RelayAgentRuntime implements AgentRuntime {
       });
     }
   }
+}
 
-  private getJson<TValue>(path: string): Promise<Result<TValue>> {
-    return this.requestJson<TValue>(path, {
-      method: "GET"
-    });
+function buildConversationMessage(input: {
+  expectedOutputSchema: string;
+  operation: string;
+  payload: unknown;
+  stage: string;
+}): string {
+  return [
+    `You are supporting loop.study during the ${input.stage} stage.`,
+    `Complete the ${input.operation} operation.`,
+    `Return valid JSON only using the shape {"result": ${input.expectedOutputSchema}}.`,
+    "Use the structured context below and produce the candidate result for loop.study to validate.",
+    "Structured context:",
+    JSON.stringify(
+      {
+        operation: input.operation,
+        stage: input.stage,
+        payload: input.payload
+      },
+      null,
+      2
+    )
+  ].join("\n\n");
+}
+
+function createRelayIdempotencyKey(input: {
+  learningLoopId: string;
+  operation: string;
+  payload: unknown;
+}): string {
+  const serialized = JSON.stringify(input.payload);
+  let hash = 0;
+
+  for (let index = 0; index < serialized.length; index += 1) {
+    hash = (hash * 31 + serialized.charCodeAt(index)) >>> 0;
   }
 
-  private postJson<TValue>(path: string, body: unknown): Promise<Result<TValue>> {
-    return this.requestJson<TValue>(path, {
-      method: "POST",
-      body: JSON.stringify(body),
-      headers: {
-        "content-type": "application/json"
-      }
-    });
-  }
+  return `loop-study:${input.learningLoopId}:${input.operation}:${hash.toString(16)}`;
+}
 
-  private async requestJson<TValue>(path: string, init: RequestInit): Promise<Result<TValue>> {
-    const url = new URL(path, this.options.baseUrl).toString();
-    const response = await this.fetcher(url, init);
-    if (!response.ok) {
-      return err({
-        code: "STATE_CONFLICT",
-        message: `Relay runtime request failed with status ${response.status}.`
-      });
-    }
-
-    return ok((await response.json()) as TValue);
+function stageForOperation(operation: string): string {
+  switch (operation) {
+    case "generateInitialAssessment":
+    case "evaluateAssessmentAttempt":
+      return "diagnosis";
+    case "generateStudyPlan":
+      return "planning";
+    case "generatePracticeActivity":
+      return "practice";
+    case "evaluateActiveReviewSession":
+      return "review";
+    default:
+      return "loop";
   }
 }

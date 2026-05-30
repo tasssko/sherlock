@@ -22,6 +22,7 @@ import { WorkspacePracticeActivityAssembler } from "./WorkspacePracticeActivityA
 import type { AgentRuntime } from "../runtime/AgentRuntime.js";
 import { FixtureAgentRuntime } from "../runtime/FixtureAgentRuntime.js";
 import { appendSucceededRuntimeTrace } from "../runtime/RuntimeTraceLedger.js";
+import { upsertRuntimeConversationBinding } from "../runtime/RuntimeConversationBinding.js";
 
 export interface PracticeActivityServiceResult {
   aggregate: PracticeActivityAggregate;
@@ -76,6 +77,9 @@ export class PracticeActivityService {
       context,
       events,
       learningLoop,
+      runtimeConversationBinding: record.runtimeConversationBindings.find(
+        (binding) => binding.learningLoopId === learningLoop.id
+      ),
       selections: selection.value.selections,
       task,
       workspace: record.workspace
@@ -99,6 +103,7 @@ export class PracticeActivityService {
       learningLoop,
       practiceActivity: assembled.value.practiceActivity,
       record,
+      runtimeConversationBinding: assembled.value.runtimeConversationBinding,
       runtimeTrace: assembled.value.runtimeTrace,
       task: completedTask.value,
       workspace: record.workspace
@@ -211,6 +216,7 @@ export class PracticeActivityService {
         updatedPracticeActivity
       ],
       activeReviewSessions: [...record.activeReviewSessions, activeReviewSession.value],
+      runtimeConversationBindings: [...record.runtimeConversationBindings],
       runtimeTraces: [...record.runtimeTraces]
     } satisfies LearningLoopRecord;
 

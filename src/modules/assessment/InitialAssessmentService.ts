@@ -66,6 +66,9 @@ export class InitialAssessmentService {
       context,
       events,
       learningLoop,
+      runtimeConversationBinding: record?.runtimeConversationBindings.find(
+        (binding) => binding.learningLoopId === learningLoop.id
+      ),
       source: sourceSelection.value.source,
       sourceItems: sourceSelection.value.items,
       task,
@@ -92,6 +95,7 @@ export class InitialAssessmentService {
       events,
       learningLoop,
       record,
+      runtimeConversationBinding: assembled.value.runtimeConversationBinding,
       runtimeTrace: assembled.value.runtimeTrace,
       task: completedTask.value,
       workspace

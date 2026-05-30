@@ -15,6 +15,7 @@ export function appendSucceededRuntimeTrace(
 
   return createLearningLoopRecord({
     ...record,
+    runtimeConversationBindings: [...record.runtimeConversationBindings],
     runtimeTraces: [
       ...record.runtimeTraces,
       RuntimeTrace.succeed({
@@ -39,6 +40,7 @@ export function appendFailedRuntimeTrace(
 
   return createLearningLoopRecord({
     ...record,
+    runtimeConversationBindings: [...record.runtimeConversationBindings],
     runtimeTraces: [
       ...record.runtimeTraces,
       RuntimeTrace.fail({

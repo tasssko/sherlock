@@ -1,7 +1,11 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { createServer } from "../src/app/api/createServer.js";
+import { demoMasterDataLibrary } from "../src/app/ui/demo/demoMasterDataLibrary.js";
+import { parseMasterDataInput } from "../src/modules/masterData/structuredRevision.js";
 import {
   LoopJourneyPage,
   buildLoopJourneyModel,
@@ -10,7 +14,7 @@ import {
 import type { LearningLoopResumeResponse } from "../src/domain/study/LearningLoops.js";
 
 const baseLoopValues: LoopJourneyPageProps["loopValues"] = {
-  learnerName: "Ava Patel",
+  learnerName: "Adam Skoudros",
   objective: "Feel steady with fractions before the next lesson.",
   practiceCardCount: 2,
   questionCount: 2,
@@ -35,6 +39,12 @@ const baseMasterDataValues: LoopJourneyPageProps["masterDataValues"] = {
   ].join("\n")
 };
 
+const maryFixture = readFileSync(
+  resolve("docs/demo-master-data/@Y7 HISTORY — MARY I MASTER REVISION DOCUMENT.txt"),
+  "utf8"
+);
+const demoTopics = [...new Set(demoMasterDataLibrary.map((entry) => entry.topic))];
+
 function renderJourney(loopState: LearningLoopResumeResponse | null): string {
   const props: LoopJourneyPageProps = {
     assessmentError: null,
@@ -43,7 +53,8 @@ function renderJourney(loopState: LearningLoopResumeResponse | null): string {
     attemptPending: false,
     completionError: null,
     completionPending: false,
-    demoTopics: ["fractions", "forces", "French vocabulary"],
+    demoMaterials: demoMasterDataLibrary,
+    demoTopics,
     loopState,
     loopValues: {
       ...baseLoopValues,
@@ -55,12 +66,20 @@ function renderJourney(loopState: LearningLoopResumeResponse | null): string {
     masterDataError: null,
     masterDataPending: false,
     masterDataStatus: "2 study prompts are ready in Year 7 Fractions Pack.",
+    masterDataSummary: {
+      subtopics: [],
+      keyPeople: [],
+      keyTerms: [],
+      importantDates: []
+    },
+    masterDataSummaryMode: "legacy",
     masterDataValues: baseMasterDataValues,
     practiceError: null,
     practicePending: false,
     resumeError: null,
     resumeLoopId: loopState?.learningLoopId ?? "",
     resumePending: false,
+    selectedDemoMaterialId: demoMasterDataLibrary[0]?.id ?? "",
     studyPlanError: null,
     studyPlanPending: false,
     onApplyDemoSeed: () => {},
@@ -75,7 +94,8 @@ function renderJourney(loopState: LearningLoopResumeResponse | null): string {
     onMasterDataValuesChange: () => {},
     onResumeLoopIdChange: () => {},
     onResumeSubmit: async () => undefined,
-    onReviewSubmit: async () => undefined
+    onReviewSubmit: async () => undefined,
+    onSelectedDemoMaterialChange: () => {}
   };
 
   return renderToStaticMarkup(createElement(LoopJourneyPage, props));
@@ -447,5 +467,128 @@ describe("Loop journey UI", () => {
     } finally {
       await server.close();
     }
+  });
+
+  it("offers canonical demo documents on the material-first start screen", () => {
+    const props: LoopJourneyPageProps = {
+      assessmentError: null,
+      assessmentPending: false,
+      attemptError: null,
+      attemptPending: false,
+      completionError: null,
+      completionPending: false,
+      demoMaterials: demoMasterDataLibrary,
+      demoTopics,
+      loopState: null,
+      loopValues: baseLoopValues,
+      masterDataError: null,
+      masterDataPending: false,
+      masterDataStatus: null,
+      masterDataSummary: {
+        subtopics: [],
+        keyPeople: [],
+        keyTerms: [],
+        importantDates: []
+      },
+      masterDataSummaryMode: "legacy",
+      masterDataValues: baseMasterDataValues,
+      practiceError: null,
+      practicePending: false,
+      resumeError: null,
+      resumeLoopId: "",
+      resumePending: false,
+      selectedDemoMaterialId: demoMasterDataLibrary[0]?.id ?? "",
+      studyPlanError: null,
+      studyPlanPending: false,
+      onApplyDemoSeed: () => {},
+      onAssessmentSubmit: async () => undefined,
+      onBuildPlan: async () => undefined,
+      onDayMinutesChange: () => {},
+      onDemoUpload: async () => undefined,
+      onGenerateCheckUp: async () => undefined,
+      onGenerateReview: async () => undefined,
+      onLoopValuesChange: () => {},
+      onMasterDataSubmit: () => {},
+      onMasterDataValuesChange: () => {},
+      onResumeLoopIdChange: () => {},
+      onResumeSubmit: async () => undefined,
+      onReviewSubmit: async () => undefined,
+      onSelectedDemoMaterialChange: () => {}
+    };
+    const markup = renderToStaticMarkup(createElement(LoopJourneyPage, props));
+
+    expect(markup).toContain("Choose a demo document");
+    expect(markup).toContain("Use this demo document");
+    expect(markup).toContain("Save this demo document");
+    expect(markup).toContain("Year 7 History: Mary I");
+    expect(markup).toContain("Year 7 Science: Chemistry");
+    expect(markup).toContain("Main topic:");
+  });
+
+  it("shows detected structured master-data metadata in the material summary", () => {
+    const summary = parseMasterDataInput({
+      sourceName: "Mary I Pack",
+      lines: maryFixture,
+      fallbackTopic: "history",
+      fallbackYearGroup: "Year 7"
+    });
+
+    const props: LoopJourneyPageProps = {
+      assessmentError: null,
+      assessmentPending: false,
+      attemptError: null,
+      attemptPending: false,
+      completionError: null,
+      completionPending: false,
+      demoMaterials: demoMasterDataLibrary,
+      demoTopics,
+      loopState: null,
+      loopValues: {
+        ...baseLoopValues,
+        topic: "Mary I",
+        yearGroup: "Year 7"
+      },
+      masterDataError: null,
+      masterDataPending: false,
+      masterDataStatus: "Ready",
+      masterDataSummary: summary.summary,
+      masterDataSummaryMode: summary.mode,
+      masterDataValues: {
+        sourceName: "Mary I Pack",
+        lines: maryFixture
+      },
+      practiceError: null,
+      practicePending: false,
+      resumeError: null,
+      resumeLoopId: "",
+      resumePending: false,
+      selectedDemoMaterialId: "history-mary-i-txt",
+      studyPlanError: null,
+      studyPlanPending: false,
+      onApplyDemoSeed: () => {},
+      onAssessmentSubmit: async () => undefined,
+      onBuildPlan: async () => undefined,
+      onDayMinutesChange: () => {},
+      onDemoUpload: async () => undefined,
+      onGenerateCheckUp: async () => undefined,
+      onGenerateReview: async () => undefined,
+      onLoopValuesChange: () => {},
+      onMasterDataSubmit: () => {},
+      onMasterDataValuesChange: () => {},
+      onResumeLoopIdChange: () => {},
+      onResumeSubmit: async () => undefined,
+      onReviewSubmit: async () => undefined,
+      onSelectedDemoMaterialChange: () => {}
+    };
+
+    const markup = renderToStaticMarkup(createElement(LoopJourneyPage, props));
+
+    expect(markup).toContain("History");
+    expect(markup).toContain("Year 7");
+    expect(markup).toContain("Mary I");
+    expect(markup).toContain("Key people");
+    expect(markup).toContain("Philip II Of Spain");
+    expect(markup).toContain("Important dates");
+    expect(markup).toContain("10 July 1553");
   });
 });

@@ -14,6 +14,7 @@ import type { AgentRuntime } from "../runtime/AgentRuntime.js";
 import { FixtureAgentRuntime } from "../runtime/FixtureAgentRuntime.js";
 import { NextActionProjector } from "../learning/NextActionProjector.js";
 import { appendSucceededRuntimeTrace } from "../runtime/RuntimeTraceLedger.js";
+import { upsertRuntimeConversationBinding } from "../runtime/RuntimeConversationBinding.js";
 
 export class AssessmentAttemptController
   implements Controller<SubmitAssessmentAttemptCommand, AssessmentAttemptResponse>
@@ -62,7 +63,10 @@ export class AssessmentAttemptController
       assessment,
       command,
       events,
-      learningLoop
+      learningLoop,
+      runtimeConversationBinding: located.record.runtimeConversationBindings.find(
+        (binding) => binding.learningLoopId === learningLoop.id
+      )
     });
     if (!evaluation.ok) {
       return evaluation;
@@ -88,6 +92,10 @@ export class AssessmentAttemptController
       masteryProfiles: [...located.record.masteryProfiles],
       practiceActivities: [...located.record.practiceActivities],
       activeReviewSessions: [...located.record.activeReviewSessions],
+      runtimeConversationBindings: upsertRuntimeConversationBinding(
+        located.record.runtimeConversationBindings,
+        evaluation.value.runtimeConversationBinding
+      ),
       runtimeTraces: [...located.record.runtimeTraces]
     }),
       {

@@ -17,6 +17,7 @@ import { WorkspaceStudyPlanAssembler } from "./WorkspaceStudyPlanAssembler.js";
 import type { AgentRuntime } from "../runtime/AgentRuntime.js";
 import { FixtureAgentRuntime } from "../runtime/FixtureAgentRuntime.js";
 import { appendSucceededRuntimeTrace } from "../runtime/RuntimeTraceLedger.js";
+import type { RuntimeConversationBinding } from "../runtime/RuntimeConversationBinding.js";
 
 export interface GenerateStudyPlanInput {
   command: CreateStudyPlanCommand;
@@ -89,7 +90,11 @@ export class StudyPlanGenerationService {
 
     const agent = createStudyPlannerAgent();
     const generated = await this.runtime.generateStudyPlan({
-      context
+      context,
+      learningLoopId: learningLoop.id,
+      runtimeConversationBinding: input.existingRecord?.runtimeConversationBindings.find(
+        (binding) => binding.learningLoopId === learningLoop.id
+      )
     });
     if (!generated.ok) {
       return generated;
@@ -160,6 +165,7 @@ export class StudyPlanGenerationService {
       ok: true,
       value: {
         ...aggregate.value,
+        runtimeConversationBinding: generated.value.runtimeConversationBinding,
         runtimeTrace: generated.value.runtimeTrace,
         // keep aggregate shape, trace is internal-only
       }

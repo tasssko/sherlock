@@ -23,6 +23,33 @@ pnpm dev:frontend
 The API runs on `http://127.0.0.1:3001` in the local example setup.
 The Vite app runs on `http://127.0.0.1:4174`.
 
+Fixture mode is the default and requires no Relay environment.
+
+Relay mode requires only:
+
+```bash
+LOOP_STUDY_AGENT_RUNTIME=relay
+LOOP_STUDY_RELAY_API_URL=http://127.0.0.1:3000
+```
+
+The default loop.study Relay runtime profile provisions the workspace, capability routes, controller, and policy automatically.
+
+Optional advanced overrides:
+
+```bash
+LOOP_STUDY_RELAY_PROFILE=default
+LOOP_STUDY_RELAY_WORKSPACE_ID=workspace_study_advisor
+LOOP_STUDY_RELAY_TEMPLATE_PATH=/absolute/path/to/profile.json
+```
+
+Legacy `SHERLOCK_AGENT_RUNTIME` and `RELAY_*` variables still work through a deprecated compatibility layer, but the preferred surface is the `LOOP_STUDY_*` contract above.
+
+For local Relay-backed development:
+
+```bash
+./scripts/dev-relay.sh
+```
+
 ## Current Vertical Slices
 
 `POST /v1/master-data` uploads approved curriculum or study-source items for later assessment generation.

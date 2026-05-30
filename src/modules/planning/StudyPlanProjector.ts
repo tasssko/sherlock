@@ -17,6 +17,7 @@ import type {
 } from "../../domain/study/StudyPlanning.js";
 import { NextActionProjector } from "../learning/NextActionProjector.js";
 import type { RuntimeTraceSeed } from "../runtime/RuntimeTrace.js";
+import type { RuntimeConversationBinding } from "../runtime/RuntimeConversationBinding.js";
 
 export interface StudyPlanAggregate {
   workspace: Workspace;
@@ -30,6 +31,7 @@ export interface StudyPlanAggregate {
   knowledgeGaps: readonly KnowledgeGap[];
   masteryProfile?: MasteryProfile;
   events: readonly DomainEvent[];
+  runtimeConversationBinding?: RuntimeConversationBinding;
   runtimeTrace?: RuntimeTraceSeed;
 }
 

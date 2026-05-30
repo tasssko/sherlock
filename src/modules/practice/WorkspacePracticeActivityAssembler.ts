@@ -11,6 +11,10 @@ import {
 } from "../planning/LearningLoopRepository.js";
 import type { PracticeActivityAggregate } from "./PracticeActivityProjector.js";
 import type { RuntimeTraceSeed } from "../runtime/RuntimeTrace.js";
+import {
+  upsertRuntimeConversationBinding,
+  type RuntimeConversationBinding
+} from "../runtime/RuntimeConversationBinding.js";
 
 export class WorkspacePracticeActivityAssembler {
   assemble(input: {
@@ -19,6 +23,7 @@ export class WorkspacePracticeActivityAssembler {
     learningLoop: LearningLoop;
     practiceActivity: PracticeActivity;
     record: LearningLoopRecord;
+    runtimeConversationBinding?: RuntimeConversationBinding;
     runtimeTrace?: RuntimeTraceSeed;
     task: Task;
     workspace: Workspace;
@@ -55,6 +60,10 @@ export class WorkspacePracticeActivityAssembler {
         masteryProfiles: [...input.record.masteryProfiles],
         practiceActivities: [...input.record.practiceActivities, input.practiceActivity],
         activeReviewSessions: [...input.record.activeReviewSessions],
+        runtimeConversationBindings: upsertRuntimeConversationBinding(
+          input.record.runtimeConversationBindings,
+          input.runtimeConversationBinding
+        ),
         runtimeTraces: [...input.record.runtimeTraces]
       }),
       aggregate: {

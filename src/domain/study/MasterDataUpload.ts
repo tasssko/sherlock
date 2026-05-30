@@ -1,5 +1,5 @@
 import type {
-  MasterDataItemSnapshot,
+  PublicMasterDataItemSnapshot,
   MasterDataSourceSnapshot
 } from "../learning/MasterData.js";
 
@@ -16,5 +16,5 @@ export interface UploadMasterDataCommand {
 
 export interface MasterDataUploadResponse {
   source: MasterDataSourceSnapshot;
-  items: readonly MasterDataItemSnapshot[];
+  items: readonly PublicMasterDataItemSnapshot[];
 }

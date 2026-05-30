@@ -11,6 +11,7 @@ import { StudyPlanGenerationService } from "./StudyPlanGenerationService.js";
 import type { AgentRuntime } from "../runtime/AgentRuntime.js";
 import { FixtureAgentRuntime } from "../runtime/FixtureAgentRuntime.js";
 import { appendSucceededRuntimeTrace } from "../runtime/RuntimeTraceLedger.js";
+import { upsertRuntimeConversationBinding } from "../runtime/RuntimeConversationBinding.js";
 
 export class StudyPlanController
   implements Controller<CreateStudyPlanCommand, StudyPlanResponse>
@@ -73,6 +74,10 @@ export class StudyPlanController
         ,
         practiceActivities: [...(existingRecord?.practiceActivities ?? [])],
         activeReviewSessions: [...(existingRecord?.activeReviewSessions ?? [])],
+        runtimeConversationBindings: upsertRuntimeConversationBinding(
+          existingRecord?.runtimeConversationBindings ?? [],
+          aggregate.value.runtimeConversationBinding
+        ),
         runtimeTraces: [...(existingRecord?.runtimeTraces ?? [])]
       }),
         {

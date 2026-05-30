@@ -12,10 +12,12 @@ import type { PracticeActivitySelection } from "./PracticeSourceSelector.js";
 import type { AgentRuntime } from "../runtime/AgentRuntime.js";
 import { FixtureAgentRuntime } from "../runtime/FixtureAgentRuntime.js";
 import type { RuntimeTraceSeed } from "../runtime/RuntimeTrace.js";
+import type { RuntimeConversationBinding } from "../runtime/RuntimeConversationBinding.js";
 
 export interface FlashcardSetAssembly {
   agent: ReturnType<typeof createPracticeActivityAgent>;
   practiceActivity: PracticeActivity;
+  runtimeConversationBinding?: RuntimeConversationBinding;
   runtimeTrace?: RuntimeTraceSeed;
 }
 
@@ -29,19 +31,22 @@ export class FlashcardSetAssembler {
     context: PracticeActivityContext;
     events: DomainEventRecorder;
     learningLoop: LearningLoop;
+    runtimeConversationBinding?: RuntimeConversationBinding;
     selections: readonly PracticeActivitySelection[];
     task: Task;
     workspace: Workspace;
   }): Promise<Result<FlashcardSetAssembly>> {
     const generated = await this.runtime.generatePracticeActivity({
       context: input.context,
+      learningLoopId: input.learningLoop.id,
       selections: input.selections.map(({ gap, item }) => ({
         gap: {
           id: gap.id,
           description: gap.toSnapshot().description
         },
         item
-      }))
+      })),
+      runtimeConversationBinding: input.runtimeConversationBinding
     });
     if (!generated.ok) {
       return generated;
@@ -74,6 +79,7 @@ export class FlashcardSetAssembler {
         sourceMasterDataItemIds: input.selections.map(({ item }) => item.id),
         flashcardSet
       }),
+      runtimeConversationBinding: generated.value.runtimeConversationBinding,
       runtimeTrace: generated.value.runtimeTrace
     });
   }

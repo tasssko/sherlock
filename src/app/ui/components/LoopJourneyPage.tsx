@@ -3,6 +3,8 @@ import type { LearningLoopResumeResponse } from "../../../domain/study/LearningL
 import type { PracticeActivitySnapshot, ReviewConfidence } from "../../../domain/learning/PracticeActivity.js";
 import type { StudyDay } from "../../../domain/study/StudySchedule.js";
 import { studyDays } from "../../../domain/study/StudySchedule.js";
+import type { ParsedMasterDataSummary } from "../../../modules/masterData/structuredRevision.js";
+import type { DemoMasterDataDocument } from "../demo/demoMasterDataLibrary.js";
 
 type JourneyStageKey =
   | "material-intake"
@@ -31,6 +33,12 @@ export interface LoopJourneyModel {
   stages: readonly LoopJourneyStage[];
 }
 
+interface CoachThreadMessage {
+  body: string;
+  role: "action" | "coach" | "learner";
+  title: string;
+}
+
 export interface LoopJourneyPageProps {
   assessmentError: string | null;
   assessmentPending: boolean;
@@ -38,6 +46,7 @@ export interface LoopJourneyPageProps {
   attemptPending: boolean;
   completionError: string | null;
   completionPending: boolean;
+  demoMaterials: readonly DemoMasterDataDocument[];
   demoTopics: readonly string[];
   loopState: LearningLoopResumeResponse | null;
   loopValues: {
@@ -52,6 +61,8 @@ export interface LoopJourneyPageProps {
   masterDataError: string | null;
   masterDataPending: boolean;
   masterDataStatus: string | null;
+  masterDataSummary: ParsedMasterDataSummary;
+  masterDataSummaryMode: "legacy" | "structured";
   masterDataValues: {
     sourceName: string;
     lines: string;
@@ -61,6 +72,7 @@ export interface LoopJourneyPageProps {
   resumeError: string | null;
   resumeLoopId: string;
   resumePending: boolean;
+  selectedDemoMaterialId: string;
   studyPlanError: string | null;
   studyPlanPending: boolean;
   onApplyDemoSeed: () => void;
@@ -88,6 +100,7 @@ export interface LoopJourneyPageProps {
       responseText: string;
     }[]
   ) => Promise<void>;
+  onSelectedDemoMaterialChange: (id: string) => void;
 }
 
 const stageOrder: readonly JourneyStageKey[] = [
@@ -133,6 +146,30 @@ function previewPrompts(lines: string): readonly string[] {
     .map((line) => line.split("||")[0]?.trim() ?? line);
 }
 
+function renderSummaryList(title: string, values: readonly string[]) {
+  if (values.length === 0) {
+    return null;
+  }
+
+  const visibleValues = values.slice(0, 8);
+
+  return (
+    <section className="completion-card">
+      <p className="subtle-heading">{title}</p>
+      <div className="checkpoint-row">
+        {visibleValues.map((value) => (
+          <span key={value} className="checkpoint-chip">
+            {value}
+          </span>
+        ))}
+      </div>
+      {values.length > visibleValues.length ? (
+        <p>{values.length - visibleValues.length} more appear in the full material.</p>
+      ) : null}
+    </section>
+  );
+}
+
 function remainingFocusAreas(loopState: LearningLoopResumeResponse | null): readonly string[] {
   if (!loopState?.latestActiveReviewSession) {
     return loopState?.knowledgeGaps.map((gap) => gap.description) ?? [];
@@ -156,6 +193,121 @@ function currentPracticeReviewed(loopState: LearningLoopResumeResponse | null): 
 
   const lastReviewId = currentPractice.reviewSessionIds.at(-1);
   return lastReviewId === latestReview.id;
+}
+
+function buildCoachThread(input: {
+  loopState: LearningLoopResumeResponse | null;
+  loopValues: LoopJourneyPageProps["loopValues"];
+  stage: LoopJourneyStage;
+}): readonly CoachThreadMessage[] {
+  const { loopState, loopValues, stage } = input;
+  const learnerName = loopState?.workspace.learner.name || loopValues.learnerName;
+  const topic = loopState?.learningLoop.topic || loopValues.topic;
+  const focusAreas = remainingFocusAreas(loopState);
+  const reviewCount = loopState?.currentPracticeActivity?.flashcardSet.cards.length ?? 0;
+
+  switch (stage.key) {
+    case "material-intake":
+      return [
+        {
+          role: "coach",
+          title: "Coach",
+          body: "Start by loading one clear set of material so this round stays focused."
+        },
+        {
+          role: "action",
+          title: "Next move",
+          body: `Choose a demo document or paste the revision material for ${topic || "this topic"}.`
+        }
+      ];
+    case "material-summary":
+      return [
+        {
+          role: "coach",
+          title: "Coach",
+          body: stage.summary
+        }
+      ];
+    case "learner-focus":
+      return [
+        {
+          role: "coach",
+          title: "Coach",
+          body: "Set the round target and the time you can realistically protect this week."
+        },
+        {
+          role: "learner",
+          title: learnerName,
+          body: loopValues.objective || `I want ${topic} to feel easier by the end of this round.`
+        }
+      ];
+    case "check-up":
+      return [
+        {
+          role: "coach",
+          title: "Coach",
+          body: "The first check-up should surface what is already secure and what still needs support."
+        },
+        {
+          role: "action",
+          title: "Next move",
+          body: stage.summary
+        }
+      ];
+    case "focus-areas":
+      return [
+        {
+          role: "coach",
+          title: "Coach",
+          body:
+            focusAreas.length > 0
+              ? `These are the ideas to tighten next: ${focusAreas.slice(0, 3).join("; ")}${focusAreas.length > 3 ? "..." : ""}`
+              : "The check-up did not surface any major gaps for this round."
+        }
+      ];
+    case "study-plan":
+      return [
+        {
+          role: "coach",
+          title: "Coach",
+          body: "Turn the diagnosed gaps into a short, realistic plan you can actually follow."
+        },
+        {
+          role: "action",
+          title: "Next move",
+          body: stage.summary
+        }
+      ];
+    case "active-review":
+      return [
+        {
+          role: "coach",
+          title: "Coach",
+          body: `Work through ${reviewCount || loopValues.practiceCardCount} active recall prompt${(reviewCount || loopValues.practiceCardCount) === 1 ? "" : "s"} and answer before you reveal the back.`
+        }
+      ];
+    case "progress-update":
+      return [
+        {
+          role: "coach",
+          title: "Coach",
+          body: stage.summary
+        }
+      ];
+    case "next-loop":
+      return [
+        {
+          role: "coach",
+          title: "Coach",
+          body: "Use this review evidence to decide whether the next loop should revisit the same gaps or move forward."
+        },
+        {
+          role: "action",
+          title: "Next move",
+          body: stage.summary
+        }
+      ];
+  }
 }
 
 export function buildLoopJourneyModel(input: {
@@ -335,18 +487,22 @@ export function LoopJourneyPage(props: LoopJourneyPageProps) {
     attemptPending,
     completionError,
     completionPending,
+    demoMaterials,
     demoTopics,
     loopState,
     loopValues,
     masterDataError,
     masterDataPending,
     masterDataStatus,
+    masterDataSummary,
+    masterDataSummaryMode,
     masterDataValues,
     practiceError,
     practicePending,
     resumeError,
     resumeLoopId,
     resumePending,
+    selectedDemoMaterialId,
     studyPlanError,
     studyPlanPending,
     onApplyDemoSeed,
@@ -361,7 +517,8 @@ export function LoopJourneyPage(props: LoopJourneyPageProps) {
     onMasterDataValuesChange,
     onResumeLoopIdChange,
     onResumeSubmit,
-    onReviewSubmit
+    onReviewSubmit,
+    onSelectedDemoMaterialChange
   } = props;
 
   const journey = useMemo(
@@ -380,6 +537,17 @@ export function LoopJourneyPage(props: LoopJourneyPageProps) {
   const focusAreas = remainingFocusAreas(loopState);
   const improvedItems = loopState?.latestActiveReviewSession?.itemResults.filter((result) => result.correct) ?? [];
   const nextLoopStart = loopState?.latestActiveReviewSession?.nextReviewAt;
+  const hasStructuredSummary =
+    masterDataSummaryMode === "structured" &&
+    Boolean(
+      masterDataSummary.subject ||
+        masterDataSummary.yearGroup ||
+        masterDataSummary.mainTopic ||
+        masterDataSummary.subtopics.length ||
+        masterDataSummary.keyPeople.length ||
+        masterDataSummary.keyTerms.length ||
+        masterDataSummary.importantDates.length
+    );
 
   useEffect(() => {
     currentStageRef.current?.scrollIntoView({
@@ -455,15 +623,9 @@ export function LoopJourneyPage(props: LoopJourneyPageProps) {
               {resumePending ? "Loading..." : "Resume"}
             </button>
           </form>
-          <div className="utility-actions">
-            <button type="button" className="secondary-cta" onClick={onApplyDemoSeed}>
-              Load the Year 7 demo
-            </button>
-            <button type="button" className="secondary-cta" onClick={() => void onDemoUpload()}>
-              Save the full demo set
-            </button>
-          </div>
-          <p className="hint">Demo topics: {demoTopics.join(", ")}</p>
+          <p className="hint">
+            Demo materials available across {demoTopics.join(", ")}.
+          </p>
           {resumeError ? <p className="error">{resumeError}</p> : null}
         </div>
       </header>
@@ -515,6 +677,23 @@ export function LoopJourneyPage(props: LoopJourneyPageProps) {
 
                 {isCurrent ? (
                   <div className="current-stage-panel">
+                    <section className="coach-thread" aria-label="Coach thread">
+                      {buildCoachThread({
+                        loopState,
+                        loopValues,
+                        stage
+                      }).map((message, index) => (
+                        <div
+                          key={`${stage.key}_${message.role}_${index}`}
+                          className="coach-bubble"
+                          data-coach-role={message.role}
+                        >
+                          <p className="coach-bubble-label">{message.title}</p>
+                          <p className="coach-bubble-body">{message.body}</p>
+                        </div>
+                      ))}
+                    </section>
+
                     {stage.key === "material-intake" ? (
                       <form className="stage-form" onSubmit={onMasterDataSubmit}>
                         <div className="split-callout">
@@ -526,6 +705,53 @@ export function LoopJourneyPage(props: LoopJourneyPageProps) {
                             </p>
                           </div>
                         </div>
+
+                        <section className="completion-card">
+                          <p className="subtle-heading">Choose a demo document</p>
+                          <div className="field-grid">
+                            <label>
+                              Demo material
+                              <select
+                                value={selectedDemoMaterialId}
+                                onChange={(event) =>
+                                  onSelectedDemoMaterialChange(event.target.value)
+                                }
+                              >
+                                {demoMaterials.map((material) => (
+                                  <option key={material.id} value={material.id}>
+                                    {material.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </label>
+                            <div className="journey-list compact-list">
+                              {demoMaterials
+                                .filter((material) => material.id === selectedDemoMaterialId)
+                                .map((material) => (
+                                  <div key={material.id} className="list-card">
+                                    <p className="list-title">{material.label}</p>
+                                    <p>
+                                      {material.subject} · {material.yearGroup}
+                                    </p>
+                                    <p>Main topic: {material.topic}</p>
+                                  </div>
+                                ))}
+                            </div>
+                          </div>
+                          <div className="checkpoint-row">
+                            <button type="button" className="secondary-cta" onClick={onApplyDemoSeed}>
+                              Use this demo document
+                            </button>
+                            <button
+                              type="button"
+                              className="secondary-cta"
+                              disabled={masterDataPending}
+                              onClick={() => void onDemoUpload()}
+                            >
+                              {masterDataPending ? "Saving..." : "Save this demo document"}
+                            </button>
+                          </div>
+                        </section>
 
                         <div className="field-grid">
                           <label>
@@ -556,7 +782,7 @@ export function LoopJourneyPage(props: LoopJourneyPageProps) {
                         </div>
 
                         <label>
-                          Paste one line per prompt
+                          Paste study material
                           <textarea
                             rows={10}
                             value={masterDataValues.lines}
@@ -570,8 +796,31 @@ export function LoopJourneyPage(props: LoopJourneyPageProps) {
                         </label>
 
                         <p className="hint">
-                          Use <code>prompt || answer || visible note || optional keywords</code>.
+                          Paste your own notes or use <code>prompt || answer || visible note || optional keywords</code>.
                         </p>
+                        {hasStructuredSummary ? (
+                          <section className="completion-card">
+                            <p className="subtle-heading">Detected from this document</p>
+                            <div className="journey-list compact-list">
+                              <div className="list-card">
+                                <p className="list-title">
+                                  {masterDataSummary.mainTopic ?? loopValues.topic}
+                                </p>
+                                <p>
+                                  {masterDataSummary.subject ?? "Unknown subject"} ·{" "}
+                                  {masterDataSummary.yearGroup ?? loopValues.yearGroup}
+                                </p>
+                                {masterDataSummary.documentTitle ? (
+                                  <p>Title: {masterDataSummary.documentTitle}</p>
+                                ) : null}
+                              </div>
+                            </div>
+                            {renderSummaryList("Subtopics found", masterDataSummary.subtopics)}
+                            {renderSummaryList("Key people", masterDataSummary.keyPeople)}
+                            {renderSummaryList("Key terms", masterDataSummary.keyTerms)}
+                            {renderSummaryList("Important dates", masterDataSummary.importantDates)}
+                          </section>
+                        ) : null}
                         <button
                           type="submit"
                           className="primary-cta"
@@ -956,13 +1205,31 @@ export function LoopJourneyPage(props: LoopJourneyPageProps) {
                   </div>
                 ) : stage.key === "material-summary" && stage.state !== "locked" ? (
                   <div className="collapsed-preview">
-                    <div className="checkpoint-row">
-                      {previewPrompts(masterDataValues.lines).map((prompt) => (
-                        <span key={prompt} className="checkpoint-chip">
-                          {prompt}
-                        </span>
-                      ))}
-                    </div>
+                    {hasStructuredSummary ? (
+                      <div className="journey-list compact-list">
+                        <div className="list-card">
+                          <p className="list-title">
+                            {masterDataSummary.mainTopic ?? loopValues.topic}
+                          </p>
+                          <p>
+                            {masterDataSummary.subject ?? "Unknown subject"} ·{" "}
+                            {masterDataSummary.yearGroup ?? loopValues.yearGroup}
+                          </p>
+                        </div>
+                        {renderSummaryList("Subtopics found", masterDataSummary.subtopics)}
+                        {renderSummaryList("Key people", masterDataSummary.keyPeople)}
+                        {renderSummaryList("Key terms", masterDataSummary.keyTerms)}
+                        {renderSummaryList("Important dates", masterDataSummary.importantDates)}
+                      </div>
+                    ) : (
+                      <div className="checkpoint-row">
+                        {previewPrompts(masterDataValues.lines).map((prompt) => (
+                          <span key={prompt} className="checkpoint-chip">
+                            {prompt}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 ) : null}
               </article>

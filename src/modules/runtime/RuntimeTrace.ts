@@ -11,7 +11,9 @@ export type RuntimeOperation =
 
 export interface RelayTaskSnapshot {
   relayArtifactIds: readonly string[];
+  relayConversationId?: string;
   relayMessageId?: string;
+  relayResponseMessageId?: string;
   relayTaskId?: string;
   relayWorkPlanId?: string;
 }

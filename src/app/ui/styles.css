@@ -307,6 +307,49 @@ label {
   border-top: 1px solid rgba(23, 32, 21, 0.1);
 }
 
+.coach-thread {
+  display: grid;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.coach-bubble {
+  max-width: 44rem;
+  padding: 0.9rem 1rem;
+  border-radius: 1.25rem;
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid rgba(23, 32, 21, 0.08);
+}
+
+.coach-bubble[data-coach-role="coach"] {
+  justify-self: start;
+  border-top-left-radius: 0.55rem;
+}
+
+.coach-bubble[data-coach-role="learner"] {
+  justify-self: end;
+  background: rgba(33, 55, 43, 0.1);
+  border-top-right-radius: 0.55rem;
+}
+
+.coach-bubble[data-coach-role="action"] {
+  justify-self: start;
+  background: rgba(255, 239, 206, 0.78);
+}
+
+.coach-bubble-label,
+.coach-bubble-body {
+  margin: 0;
+}
+
+.coach-bubble-label {
+  margin-bottom: 0.2rem;
+  font-size: 0.82rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgba(23, 32, 21, 0.62);
+}
+
 .stage-form,
 .journey-list {
   display: grid;

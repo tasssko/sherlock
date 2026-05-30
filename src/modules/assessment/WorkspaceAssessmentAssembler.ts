@@ -13,6 +13,10 @@ import {
 } from "../planning/LearningLoopRepository.js";
 import type { InitialAssessmentAggregate } from "./AssessmentProjector.js";
 import type { RuntimeTraceSeed } from "../runtime/RuntimeTrace.js";
+import {
+  upsertRuntimeConversationBinding,
+  type RuntimeConversationBinding
+} from "../runtime/RuntimeConversationBinding.js";
 
 export class WorkspaceAssessmentAssembler {
   assemble(input: {
@@ -22,6 +26,7 @@ export class WorkspaceAssessmentAssembler {
     events: DomainEventRecorder;
     learningLoop: LearningLoop;
     record?: LearningLoopRecord;
+    runtimeConversationBinding?: RuntimeConversationBinding;
     runtimeTrace?: RuntimeTraceSeed;
     task: Task;
     workspace: Workspace;
@@ -70,6 +75,10 @@ export class WorkspaceAssessmentAssembler {
         masteryProfiles: [...(existingRecord?.masteryProfiles ?? [])],
         practiceActivities: [...(existingRecord?.practiceActivities ?? [])],
         activeReviewSessions: [...(existingRecord?.activeReviewSessions ?? [])],
+        runtimeConversationBindings: upsertRuntimeConversationBinding(
+          existingRecord?.runtimeConversationBindings ?? [],
+          input.runtimeConversationBinding
+        ),
         runtimeTraces: [...(existingRecord?.runtimeTraces ?? [])]
       }),
       aggregate: {
