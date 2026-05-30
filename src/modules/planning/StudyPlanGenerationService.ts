@@ -9,8 +9,14 @@ import type { StudyPlanAggregate } from "./StudyPlanProjector.js";
 import { StudyPlanAdaptation } from "./StudyPlanAdaptation.js";
 import { StudyPlanTaskAssembler } from "./StudyPlanTaskAssembler.js";
 import { StudyPlanWorkPlanBuilder } from "./StudyPlanWorkPlanBuilder.js";
-import { createStudyPlannerAgent, generateStudyPlan } from "./StudyPlannerAgent.js";
+import {
+  createStudyPlannerAgent,
+  validateGeneratedStudyPlan
+} from "./StudyPlannerAgent.js";
 import { WorkspaceStudyPlanAssembler } from "./WorkspaceStudyPlanAssembler.js";
+import type { AgentRuntime } from "../runtime/AgentRuntime.js";
+import { FixtureAgentRuntime } from "../runtime/FixtureAgentRuntime.js";
+import { appendSucceededRuntimeTrace } from "../runtime/RuntimeTraceLedger.js";
 
 export interface GenerateStudyPlanInput {
   command: CreateStudyPlanCommand;
@@ -23,10 +29,11 @@ export class StudyPlanGenerationService {
     private readonly adaptation = new StudyPlanAdaptation(),
     private readonly taskAssembler = new StudyPlanTaskAssembler(),
     private readonly workPlanBuilder = new StudyPlanWorkPlanBuilder(),
-    private readonly aggregateAssembler = new WorkspaceStudyPlanAssembler()
+    private readonly aggregateAssembler = new WorkspaceStudyPlanAssembler(),
+    private readonly runtime: AgentRuntime = new FixtureAgentRuntime()
   ) {}
 
-  run(input: GenerateStudyPlanInput): Result<StudyPlanAggregate> {
+  async run(input: GenerateStudyPlanInput): Promise<Result<StudyPlanAggregate>> {
     const workspace = input.existingRecord?.workspace;
     if (!workspace) {
       return err({
@@ -81,9 +88,20 @@ export class StudyPlanGenerationService {
     );
 
     const agent = createStudyPlannerAgent();
-    const generated = generateStudyPlan(agent, context, events);
+    const generated = await this.runtime.generateStudyPlan({
+      context
+    });
     if (!generated.ok) {
       return generated;
+    }
+    const policyEvaluation = validateGeneratedStudyPlan(
+      agent,
+      context,
+      generated.value.artifactContent,
+      events
+    );
+    if (!policyEvaluation.ok) {
+      return policyEvaluation;
     }
 
     const artifact = Artifact.create(
@@ -121,7 +139,7 @@ export class StudyPlanGenerationService {
       return completedTasks;
     }
 
-    return this.aggregateAssembler.assemble({
+    const aggregate = this.aggregateAssembler.assemble({
       workspace,
       agent,
       parentTask: completedTasks.value.parentTask,
@@ -131,7 +149,20 @@ export class StudyPlanGenerationService {
       learningLoop,
       knowledgeGaps: loopKnowledgeGaps,
       masteryProfile,
-      events
+      events,
+      runtimeTrace: generated.value.runtimeTrace
     });
+    if (!aggregate.ok) {
+      return aggregate;
+    }
+
+    return {
+      ok: true,
+      value: {
+        ...aggregate.value,
+        runtimeTrace: generated.value.runtimeTrace,
+        // keep aggregate shape, trace is internal-only
+      }
+    };
   }
 }

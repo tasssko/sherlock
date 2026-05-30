@@ -1,6 +1,8 @@
-# Powertrain API
+# Relay API
 
-Developer-facing documentation for the current Powertrain backend as implemented in `src/app/api/server.ts` and validated by `test/api.test.ts`.
+Developer-facing documentation for the current Relay backend.
+
+loop.study uses Relay only as an agent/runtime execution boundary. loop.study remains the product API and does not mirror Relay routes directly.
 
 ## Scope and status
 

@@ -34,7 +34,7 @@ export async function registerStudyPlanRoutes(
       });
     }
 
-    const result = controller.execute(parsed.data);
+    const result = await controller.execute(parsed.data);
 
     if (!result.ok) {
       return reply.code(mapDomainErrorToHttpStatus(result.error.code)).send({

@@ -5,6 +5,7 @@ import type { AgentSnapshot } from "../primitives/Agent.js";
 import type { DomainEvent } from "../primitives/Event.js";
 import type { TaskSnapshot } from "../primitives/Task.js";
 import type { WorkspaceSnapshot } from "../primitives/Workspace.js";
+import type { LearningLoopRouteProjection } from "./NextAction.js";
 
 export interface CreatePracticeActivityCommand {
   learningLoopId: string;
@@ -26,7 +27,7 @@ export interface ListPracticeActivitiesQuery {
   learningLoopId: string;
 }
 
-export interface PracticeActivityResponse {
+export interface PracticeActivityResponse extends LearningLoopRouteProjection {
   workspace: WorkspaceSnapshot;
   learningLoop: LearningLoopSnapshot;
   agent: AgentSnapshot;
@@ -35,7 +36,7 @@ export interface PracticeActivityResponse {
   events: readonly DomainEvent[];
 }
 
-export interface PracticeActivityCompletionResponse {
+export interface PracticeActivityCompletionResponse extends LearningLoopRouteProjection {
   workspace: WorkspaceSnapshot;
   learningLoop: LearningLoopSnapshot;
   practiceActivity: PracticeActivitySnapshot;
@@ -44,7 +45,7 @@ export interface PracticeActivityCompletionResponse {
   events: readonly DomainEvent[];
 }
 
-export interface PracticeActivityListResponse {
+export interface PracticeActivityListResponse extends LearningLoopRouteProjection {
   learningLoop: LearningLoopSnapshot;
   practiceActivities: readonly PracticeActivitySnapshot[];
 }

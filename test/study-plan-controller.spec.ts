@@ -7,11 +7,11 @@ import { MasterDataUploadController } from "../src/modules/assessment/MasterData
 import { studyDays } from "../src/domain/study/StudySchedule.js";
 
 describe("StudyPlanController", () => {
-  it("requires an existing diagnosed learning loop before adapting a study plan", () => {
+  it("requires an existing diagnosed learning loop before adapting a study plan", async () => {
     const repository = new SqliteLearningLoopRepository(":memory:");
     const controller = new StudyPlanController(repository);
 
-    const result = controller.execute({
+    const result = await controller.execute({
       learnerName: "Year 7 learner",
       yearGroup: "Year 7",
       objective: "Build a weekly plan for fractions.",
@@ -30,7 +30,7 @@ describe("StudyPlanController", () => {
     expect(result.error.message).toContain("learning loop must exist");
   });
 
-  it("returns a structured workspace snapshot with ordered lifecycle events", () => {
+  it("returns a structured workspace snapshot with ordered lifecycle events", async () => {
     const repository = new SqliteLearningLoopRepository(":memory:");
     const uploadController = new MasterDataUploadController(repository);
     const assessmentController = new InitialAssessmentController(repository);
@@ -49,7 +49,7 @@ describe("StudyPlanController", () => {
       ]
     });
 
-    const assessment = assessmentController.execute({
+    const assessment = await assessmentController.execute({
       learnerName: "Year 7 learner",
       yearGroup: "Year 7",
       topic: "fractions",
@@ -60,7 +60,7 @@ describe("StudyPlanController", () => {
       return;
     }
 
-    const attempt = attemptController.execute({
+    const attempt = await attemptController.execute({
       assessmentId: assessment.value.assessment.id,
       responses: assessment.value.assessment.items.map((item) => ({
         itemId: item.id,
@@ -72,7 +72,7 @@ describe("StudyPlanController", () => {
       return;
     }
 
-    const result = controller.execute({
+    const result = await controller.execute({
       learnerName: "Year 7 learner",
       yearGroup: "Year 7",
       objective: "Build a weekly plan for fractions, forces, and French vocabulary.",

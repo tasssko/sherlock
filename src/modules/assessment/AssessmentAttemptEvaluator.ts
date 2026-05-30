@@ -5,67 +5,53 @@ import { err, ok, type Result } from "../../domain/primitives/result.js";
 import type { SubmitAssessmentAttemptCommand } from "../../domain/study/AssessmentGeneration.js";
 import type { Assessment } from "../../domain/learning/Assessment.js";
 import type { LearningLoop } from "../../domain/learning/LearningLoop.js";
-
-function normalize(value: string): string {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
+import type { AgentRuntime } from "../runtime/AgentRuntime.js";
+import { FixtureAgentRuntime } from "../runtime/FixtureAgentRuntime.js";
+import type { RuntimeTraceSeed } from "../runtime/RuntimeTrace.js";
 
 export interface AssessmentAttemptEvaluation {
   attempt: Attempt;
   evaluation: Evaluation;
   knowledgeGaps: readonly KnowledgeGap[];
   learningLoop: LearningLoop;
+  runtimeTrace?: RuntimeTraceSeed;
 }
 
 export class AssessmentAttemptEvaluator {
-  evaluate(input: {
+  constructor(private readonly runtime: AgentRuntime = new FixtureAgentRuntime()) {}
+
+  async evaluate(input: {
     assessment: Assessment;
     command: SubmitAssessmentAttemptCommand;
     events: DomainEventRecorder;
     learningLoop: LearningLoop;
-  }): Result<AssessmentAttemptEvaluation> {
+  }): Promise<Result<AssessmentAttemptEvaluation>> {
     const assessmentSnapshot = input.assessment.toSnapshot();
-    const responseByItemId = new Map(input.command.responses.map((response) => [response.itemId, response.answer]));
-
-    if (responseByItemId.size === 0) {
-      return err({
-        code: "VALIDATION_ERROR",
-        message: "At least one assessment response is required."
-      });
-    }
-
     const attempt = Attempt.create(
       input.assessment.workspaceId,
       input.assessment.id,
       input.command.responses,
       input.events
     );
-    const itemResults = assessmentSnapshot.items.map((item) => {
-      const answer = responseByItemId.get(item.id) ?? "";
-      const correct = normalize(answer) === normalize(item.canonicalAnswer);
-
-      return {
-        itemId: item.id,
-        correct,
-        feedback: correct
-          ? `Secure response for ${item.topic}.`
-          : `Review the underlying idea for ${item.topic} and revisit the missed method.`,
-        topic: item.topic
-      };
+    const runtimeEvaluation = await this.runtime.evaluateAssessmentAttempt({
+      assessment: {
+        items: assessmentSnapshot.items,
+        topic: assessmentSnapshot.topic
+      },
+      contextTopic: assessmentSnapshot.topic,
+      responses: input.command.responses
     });
-    const correctCount = itemResults.filter((result) => result.correct).length;
-    const score = itemResults.length === 0 ? 0 : correctCount / itemResults.length;
+    if (!runtimeEvaluation.ok) {
+      return runtimeEvaluation;
+    }
+
     const evaluation = Evaluation.create(
       {
         workspaceId: input.assessment.workspaceId,
         assessmentId: input.assessment.id,
         attemptId: attempt.id,
-        score,
-        itemResults
+        score: runtimeEvaluation.value.score,
+        itemResults: runtimeEvaluation.value.itemResults
       },
       input.events
     );
@@ -81,20 +67,18 @@ export class AssessmentAttemptEvaluator {
       {
         assessmentId: input.assessment.id,
         evaluationId: evaluation.id,
-        score
+        score: runtimeEvaluation.value.score
       },
       input.events
     );
 
-    const knowledgeGaps = itemResults
-      .filter((result) => !result.correct)
-      .map((result) =>
+    const knowledgeGaps = runtimeEvaluation.value.knowledgeGaps.map((candidate) =>
         KnowledgeGap.create({
           learningLoopId: input.learningLoop.id,
-          topic: result.topic,
-          description: `Needs more support with ${result.topic}.`,
-          evidence: `Missed assessment item ${result.itemId}.`,
-          severity: score < 0.5 ? "high" : "medium"
+          topic: candidate.topic,
+          description: candidate.description,
+          evidence: candidate.evidence,
+          severity: candidate.severity
         })
       );
 
@@ -107,7 +91,8 @@ export class AssessmentAttemptEvaluator {
       attempt,
       evaluation,
       knowledgeGaps,
-      learningLoop
+      learningLoop,
+      runtimeTrace: runtimeEvaluation.value.runtimeTrace
     });
   }
 }

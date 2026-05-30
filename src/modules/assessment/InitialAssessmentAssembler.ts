@@ -9,30 +9,28 @@ import type { LearningLoop } from "../../domain/learning/LearningLoop.js";
 import { ok, type Result } from "../../domain/primitives/result.js";
 import type { AssessmentArtifactContent } from "../../domain/study/AssessmentGeneration.js";
 import {
-  createAssessmentArtifactContent,
   createInitialAssessmentAgent,
   validateAssessmentArtifact
 } from "./InitialAssessmentAgent.js";
 import { AssessmentQualityValidator } from "./AssessmentQualityValidator.js";
-
-const difficultyScale: readonly ("easy" | "medium" | "stretch")[] = [
-  "easy",
-  "easy",
-  "medium",
-  "medium",
-  "stretch"
-];
+import type { AgentRuntime } from "../runtime/AgentRuntime.js";
+import { FixtureAgentRuntime } from "../runtime/FixtureAgentRuntime.js";
+import type { RuntimeTraceSeed } from "../runtime/RuntimeTrace.js";
 
 export interface InitialAssessmentAssembly {
   agent: ReturnType<typeof createInitialAssessmentAgent>;
   assessment: Assessment;
   artifact: Artifact<AssessmentArtifactContent, "assessment">;
+  runtimeTrace?: RuntimeTraceSeed;
 }
 
 export class InitialAssessmentAssembler {
-  constructor(private readonly qualityValidator = new AssessmentQualityValidator()) {}
+  constructor(
+    private readonly runtime: AgentRuntime = new FixtureAgentRuntime(),
+    private readonly qualityValidator = new AssessmentQualityValidator()
+  ) {}
 
-  assemble(input: {
+  async assemble(input: {
     context: InitialAssessmentContext;
     events: DomainEventRecorder;
     learningLoop: LearningLoop;
@@ -40,31 +38,22 @@ export class InitialAssessmentAssembler {
     sourceItems: readonly MasterDataItem[];
     task: Task;
     workspace: Workspace;
-  }): Result<InitialAssessmentAssembly> {
-    const assessmentItems = input.sourceItems.map((item, index) => ({
-      id: `assessment_item_${index + 1}`,
-      topic: item.topic,
-      prompt: item.prompt,
-      canonicalAnswer: item.canonicalAnswer,
-      visibleMaterial: item.visibleMaterial,
-      difficulty: difficultyScale[index] ?? "stretch",
-      sourceMasterDataItemId: item.id
-    }));
+  }): Promise<Result<InitialAssessmentAssembly>> {
+    const generated = await this.runtime.generateInitialAssessment({
+      context: input.context,
+      source: input.source,
+      sourceItems: input.sourceItems
+    });
+    if (!generated.ok) {
+      return generated;
+    }
 
-    const validatedItems = this.qualityValidator.validate(assessmentItems);
+    const validatedItems = this.qualityValidator.validate(generated.value.items);
     if (!validatedItems.ok) {
       return validatedItems;
     }
 
-    const artifactContent = createAssessmentArtifactContent({
-      topic: input.context.topic,
-      questionCount: input.context.questionCount,
-      items: validatedItems.value.map((item) => ({
-        id: item.id,
-        prompt: item.prompt,
-        difficulty: item.difficulty
-      }))
-    });
+    const artifactContent = generated.value.artifactContent;
     const agent = createInitialAssessmentAgent();
     const policyEvaluation = validateAssessmentArtifact(
       agent,
@@ -113,7 +102,8 @@ export class InitialAssessmentAssembler {
     return ok({
       agent,
       assessment: assessment.attachArtifact(artifact.id, input.events),
-      artifact
+      artifact,
+      runtimeTrace: generated.value.runtimeTrace
     });
   }
 }

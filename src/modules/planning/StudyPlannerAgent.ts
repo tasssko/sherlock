@@ -146,3 +146,29 @@ export function generateStudyPlan(
 
   return ok(output);
 }
+
+export function validateGeneratedStudyPlan(
+  agent: Agent,
+  context: StudyPlanningContext,
+  artifactContent: StudyPlanArtifactContent,
+  events: DomainEventRecorder
+): Result<void> {
+  events.recordAgentInvoked(agent.id, agent.role);
+
+  if (!agent.canUseCapability(capabilityCatalog.generateStudyPlan.id)) {
+    return err({
+      code: "POLICY_VIOLATION",
+      message: `Agent ${agent.id} cannot use capability ${capabilityCatalog.generateStudyPlan.id}.`
+    });
+  }
+
+  return evaluatePolicies(
+    agent.policies,
+    {
+      kind: "study-plan",
+      context,
+      artifactContent
+    },
+    events
+  );
+}

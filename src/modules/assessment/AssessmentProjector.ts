@@ -9,6 +9,8 @@ import type {
   AssessmentArtifactContent,
   InitialAssessmentResponse
 } from "../../domain/study/AssessmentGeneration.js";
+import { NextActionProjector } from "../learning/NextActionProjector.js";
+import type { RuntimeTraceSeed } from "../runtime/RuntimeTrace.js";
 
 export interface InitialAssessmentAggregate {
   workspace: Workspace;
@@ -18,11 +20,20 @@ export interface InitialAssessmentAggregate {
   assessment: Assessment;
   artifact: Artifact<AssessmentArtifactContent, "assessment">;
   events: readonly DomainEvent[];
+  runtimeTrace?: RuntimeTraceSeed;
 }
 
 export class AssessmentProjector {
+  private readonly nextActionProjector = new NextActionProjector();
+
   project(aggregate: InitialAssessmentAggregate): InitialAssessmentResponse {
     return {
+      learningLoopId: aggregate.learningLoop.id,
+      phase: aggregate.learningLoop.phase,
+      nextAction: this.nextActionProjector.project({
+        learningLoop: aggregate.learningLoop,
+        assessmentId: aggregate.assessment.id
+      }),
       workspace: aggregate.workspace.toSnapshot(),
       learningLoop: aggregate.learningLoop.toSnapshot(),
       agent: aggregate.agent.toSnapshot(),

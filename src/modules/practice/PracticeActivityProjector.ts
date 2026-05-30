@@ -10,6 +10,8 @@ import type {
   PracticeActivityListResponse,
   PracticeActivityResponse
 } from "../../domain/study/PracticeActivities.js";
+import { NextActionProjector } from "../learning/NextActionProjector.js";
+import type { RuntimeTraceSeed } from "../runtime/RuntimeTrace.js";
 
 export interface PracticeActivityAggregate {
   workspace: Workspace;
@@ -18,6 +20,7 @@ export interface PracticeActivityAggregate {
   task: Task;
   practiceActivity: PracticeActivity;
   events: readonly DomainEvent[];
+  runtimeTrace?: RuntimeTraceSeed;
 }
 
 export interface PracticeActivityCompletionAggregate {
@@ -30,8 +33,16 @@ export interface PracticeActivityCompletionAggregate {
 }
 
 export class PracticeActivityProjector {
+  private readonly nextActionProjector = new NextActionProjector();
+
   project(aggregate: PracticeActivityAggregate): PracticeActivityResponse {
     return {
+      learningLoopId: aggregate.learningLoop.id,
+      phase: aggregate.learningLoop.phase,
+      nextAction: this.nextActionProjector.project({
+        learningLoop: aggregate.learningLoop,
+        practiceActivityId: aggregate.practiceActivity.id
+      }),
       workspace: aggregate.workspace.toSnapshot(),
       learningLoop: aggregate.learningLoop.toSnapshot(),
       agent: aggregate.agent.toSnapshot(),
@@ -48,6 +59,12 @@ export class PracticeActivityProjector {
     aggregate: PracticeActivityCompletionAggregate
   ): PracticeActivityCompletionResponse {
     return {
+      learningLoopId: aggregate.learningLoop.id,
+      phase: aggregate.learningLoop.phase,
+      nextAction: this.nextActionProjector.project({
+        learningLoop: aggregate.learningLoop,
+        practiceActivityId: aggregate.practiceActivity.id
+      }),
       workspace: aggregate.workspace.toSnapshot(),
       learningLoop: aggregate.learningLoop.toSnapshot(),
       practiceActivity: aggregate.practiceActivity.toSnapshot(),
@@ -65,6 +82,12 @@ export class PracticeActivityProjector {
     practiceActivities: readonly PracticeActivity[];
   }): PracticeActivityListResponse {
     return {
+      learningLoopId: input.learningLoop.id,
+      phase: input.learningLoop.phase,
+      nextAction: this.nextActionProjector.project({
+        learningLoop: input.learningLoop,
+        practiceActivityId: input.practiceActivities[0]?.id
+      }),
       learningLoop: input.learningLoop.toSnapshot(),
       practiceActivities: input.practiceActivities.map((activity) => activity.toSnapshot())
     };

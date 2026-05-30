@@ -15,6 +15,8 @@ import type {
   StudyPlanArtifactContent,
   StudyPlanResponse
 } from "../../domain/study/StudyPlanning.js";
+import { NextActionProjector } from "../learning/NextActionProjector.js";
+import type { RuntimeTraceSeed } from "../runtime/RuntimeTrace.js";
 
 export interface StudyPlanAggregate {
   workspace: Workspace;
@@ -28,11 +30,20 @@ export interface StudyPlanAggregate {
   knowledgeGaps: readonly KnowledgeGap[];
   masteryProfile?: MasteryProfile;
   events: readonly DomainEvent[];
+  runtimeTrace?: RuntimeTraceSeed;
 }
 
 export class StudyPlanProjector {
+  private readonly nextActionProjector = new NextActionProjector();
+
   project(aggregate: StudyPlanAggregate): StudyPlanResponse {
     return {
+      learningLoopId: aggregate.learningLoop.id,
+      phase: aggregate.learningLoop.phase,
+      nextAction: this.nextActionProjector.project({
+        learningLoop: aggregate.learningLoop,
+        workPlanId: aggregate.workPlan.id
+      }),
       workspace: aggregate.workspace.toSnapshot(),
       learningLoop: aggregate.learningLoop.toSnapshot(),
       agent: aggregate.agent.toSnapshot(),

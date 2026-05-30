@@ -38,7 +38,7 @@ export async function registerAssessmentRoutes(
       });
     }
 
-    const result = initialAssessmentController.execute(parsed.data);
+    const result = await initialAssessmentController.execute(parsed.data);
     if (!result.ok) {
       return reply.code(mapDomainErrorToHttpStatus(result.error.code)).send({
         error: result.error.message,
@@ -60,7 +60,7 @@ export async function registerAssessmentRoutes(
       });
     }
 
-    const result = assessmentAttemptController.execute(parsed.data);
+    const result = await assessmentAttemptController.execute(parsed.data);
     if (!result.ok) {
       return reply.code(mapDomainErrorToHttpStatus(result.error.code)).send({
         error: result.error.message,

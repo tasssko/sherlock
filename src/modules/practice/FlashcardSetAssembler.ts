@@ -9,55 +9,51 @@ import { ok, type Result } from "../../domain/primitives/result.js";
 import { createPracticeActivityAgent, validatePracticeActivity } from "./PracticeActivityAgent.js";
 import { PracticeActivityQualityValidator } from "./PracticeActivityQualityValidator.js";
 import type { PracticeActivitySelection } from "./PracticeSourceSelector.js";
-
-function pickSourceSentence(item: MasterDataItem): string {
-  const sentences = item.visibleMaterial
-    .split(/(?<=[.!?])\s+/)
-    .map((sentence) => sentence.trim())
-    .filter(Boolean);
-  const normalizedAnswer = item.canonicalAnswer.toLowerCase();
-
-  return (
-    sentences.find((sentence) => sentence.toLowerCase().includes(normalizedAnswer)) ??
-    sentences[0] ??
-    item.visibleMaterial
-  );
-}
+import type { AgentRuntime } from "../runtime/AgentRuntime.js";
+import { FixtureAgentRuntime } from "../runtime/FixtureAgentRuntime.js";
+import type { RuntimeTraceSeed } from "../runtime/RuntimeTrace.js";
 
 export interface FlashcardSetAssembly {
   agent: ReturnType<typeof createPracticeActivityAgent>;
   practiceActivity: PracticeActivity;
+  runtimeTrace?: RuntimeTraceSeed;
 }
 
 export class FlashcardSetAssembler {
-  constructor(private readonly qualityValidator = new PracticeActivityQualityValidator()) {}
+  constructor(
+    private readonly runtime: AgentRuntime = new FixtureAgentRuntime(),
+    private readonly qualityValidator = new PracticeActivityQualityValidator()
+  ) {}
 
-  assemble(input: {
+  async assemble(input: {
     context: PracticeActivityContext;
     events: DomainEventRecorder;
     learningLoop: LearningLoop;
     selections: readonly PracticeActivitySelection[];
     task: Task;
     workspace: Workspace;
-  }): Result<FlashcardSetAssembly> {
-    const cards = input.selections.map(({ gap, item }, index) => ({
-      id: `flashcard_${index + 1}`,
-      front: item.prompt,
-      back: item.canonicalAnswer,
-      topic: item.topic,
-      knowledgeGapId: gap.id,
-      learningObjective: gap.toSnapshot().description,
-      sourceMasterDataItemId: item.id,
-      sourceVisibleSentence: pickSourceSentence(item)
-    }));
+  }): Promise<Result<FlashcardSetAssembly>> {
+    const generated = await this.runtime.generatePracticeActivity({
+      context: input.context,
+      selections: input.selections.map(({ gap, item }) => ({
+        gap: {
+          id: gap.id,
+          description: gap.toSnapshot().description
+        },
+        item
+      }))
+    });
+    if (!generated.ok) {
+      return generated;
+    }
 
-    const validatedCards = this.qualityValidator.validate(cards);
+    const validatedCards = this.qualityValidator.validate(generated.value.flashcardSet.cards);
     if (!validatedCards.ok) {
       return validatedCards;
     }
 
     const flashcardSet = {
-      instructions: `Review each card, attempt an answer from memory, then flip to check accuracy for ${input.context.topic}.`,
+      instructions: generated.value.flashcardSet.instructions,
       cards: validatedCards.value
     };
     const agent = createPracticeActivityAgent();
@@ -77,7 +73,8 @@ export class FlashcardSetAssembler {
         learningObjectives: input.selections.map(({ gap }) => gap.toSnapshot().description),
         sourceMasterDataItemIds: input.selections.map(({ item }) => item.id),
         flashcardSet
-      })
+      }),
+      runtimeTrace: generated.value.runtimeTrace
     });
   }
 }

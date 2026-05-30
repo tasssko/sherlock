@@ -7,6 +7,7 @@ import type {
 } from "../../domain/learning/LearningLoop.js";
 import type { MasterDataItem, MasterDataSource } from "../../domain/learning/MasterData.js";
 import type { PracticeActivity } from "../../domain/learning/PracticeActivity.js";
+import type { RuntimeTrace } from "../runtime/RuntimeTrace.js";
 import type { Artifact, ArtifactType } from "../../domain/primitives/Artifact.js";
 import type { DomainEvent } from "../../domain/primitives/Event.js";
 import type { AssessmentId, LearningLoopId, PracticeActivityId } from "../../domain/primitives/ids.js";
@@ -33,6 +34,7 @@ export interface LearningLoopRecord {
   masteryProfiles: readonly MasteryProfile[];
   practiceActivities: readonly PracticeActivity[];
   activeReviewSessions: readonly ActiveReviewSession[];
+  runtimeTraces: readonly RuntimeTrace[];
 }
 
 export function createLearningLoopRecord(record: LearningLoopRecord): LearningLoopRecord {
@@ -49,7 +51,8 @@ export function createLearningLoopRecord(record: LearningLoopRecord): LearningLo
     knowledgeGaps: [...record.knowledgeGaps],
     masteryProfiles: [...record.masteryProfiles],
     practiceActivities: [...record.practiceActivities],
-    activeReviewSessions: [...record.activeReviewSessions]
+    activeReviewSessions: [...record.activeReviewSessions],
+    runtimeTraces: [...record.runtimeTraces]
   };
 }
 

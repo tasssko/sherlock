@@ -10,6 +10,7 @@ import {
   type LearningLoopRecord
 } from "../planning/LearningLoopRepository.js";
 import type { PracticeActivityAggregate } from "./PracticeActivityProjector.js";
+import type { RuntimeTraceSeed } from "../runtime/RuntimeTrace.js";
 
 export class WorkspacePracticeActivityAssembler {
   assemble(input: {
@@ -18,6 +19,7 @@ export class WorkspacePracticeActivityAssembler {
     learningLoop: LearningLoop;
     practiceActivity: PracticeActivity;
     record: LearningLoopRecord;
+    runtimeTrace?: RuntimeTraceSeed;
     task: Task;
     workspace: Workspace;
   }) {
@@ -52,7 +54,8 @@ export class WorkspacePracticeActivityAssembler {
         knowledgeGaps: [...input.record.knowledgeGaps],
         masteryProfiles: [...input.record.masteryProfiles],
         practiceActivities: [...input.record.practiceActivities, input.practiceActivity],
-        activeReviewSessions: [...input.record.activeReviewSessions]
+        activeReviewSessions: [...input.record.activeReviewSessions],
+        runtimeTraces: [...input.record.runtimeTraces]
       }),
       aggregate: {
         workspace,
@@ -60,7 +63,8 @@ export class WorkspacePracticeActivityAssembler {
         agent: input.agent,
         task: input.task,
         practiceActivity: input.practiceActivity,
-        events: allEvents
+        events: allEvents,
+        runtimeTrace: input.runtimeTrace
       } satisfies PracticeActivityAggregate
     });
   }

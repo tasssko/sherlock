@@ -12,6 +12,7 @@ import {
   type LearningLoopRecord
 } from "../planning/LearningLoopRepository.js";
 import type { InitialAssessmentAggregate } from "./AssessmentProjector.js";
+import type { RuntimeTraceSeed } from "../runtime/RuntimeTrace.js";
 
 export class WorkspaceAssessmentAssembler {
   assemble(input: {
@@ -21,6 +22,7 @@ export class WorkspaceAssessmentAssembler {
     events: DomainEventRecorder;
     learningLoop: LearningLoop;
     record?: LearningLoopRecord;
+    runtimeTrace?: RuntimeTraceSeed;
     task: Task;
     workspace: Workspace;
   }) {
@@ -67,7 +69,8 @@ export class WorkspaceAssessmentAssembler {
         knowledgeGaps: [...(existingRecord?.knowledgeGaps ?? [])],
         masteryProfiles: [...(existingRecord?.masteryProfiles ?? [])],
         practiceActivities: [...(existingRecord?.practiceActivities ?? [])],
-        activeReviewSessions: [...(existingRecord?.activeReviewSessions ?? [])]
+        activeReviewSessions: [...(existingRecord?.activeReviewSessions ?? [])],
+        runtimeTraces: [...(existingRecord?.runtimeTraces ?? [])]
       }),
       aggregate: {
         workspace,
@@ -76,7 +79,8 @@ export class WorkspaceAssessmentAssembler {
         task: input.task,
         assessment: input.assessment,
         artifact: input.artifact,
-        events: allEvents
+        events: allEvents,
+        runtimeTrace: input.runtimeTrace
       } satisfies InitialAssessmentAggregate
     });
   }

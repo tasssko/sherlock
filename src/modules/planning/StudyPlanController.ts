@@ -8,20 +8,28 @@ import {
 import { LearnerWorkspaceKey } from "./LearnerWorkspaceKey.js";
 import { StudyPlanProjector } from "./StudyPlanProjector.js";
 import { StudyPlanGenerationService } from "./StudyPlanGenerationService.js";
+import type { AgentRuntime } from "../runtime/AgentRuntime.js";
+import { FixtureAgentRuntime } from "../runtime/FixtureAgentRuntime.js";
+import { appendSucceededRuntimeTrace } from "../runtime/RuntimeTraceLedger.js";
 
 export class StudyPlanController
   implements Controller<CreateStudyPlanCommand, StudyPlanResponse>
 {
+  private readonly service: StudyPlanGenerationService;
+
   constructor(
     private readonly repository: LearningLoopRepository,
-    private readonly service = new StudyPlanGenerationService(),
-    private readonly projector = new StudyPlanProjector()
-  ) {}
+    service?: StudyPlanGenerationService,
+    private readonly projector = new StudyPlanProjector(),
+    runtime: AgentRuntime = new FixtureAgentRuntime()
+  ) {
+    this.service = service ?? new StudyPlanGenerationService(undefined, undefined, undefined, undefined, undefined, runtime);
+  }
 
-  execute(command: CreateStudyPlanCommand): Result<StudyPlanResponse> {
+  async execute(command: CreateStudyPlanCommand): Promise<Result<StudyPlanResponse>> {
     const repositoryKey = LearnerWorkspaceKey.fromCommand(command);
     const existingRecord = this.repository.findRecord(repositoryKey);
-    const aggregate = this.service.run({
+    const aggregate = await this.service.run({
       command,
       existingRecord
     });
@@ -32,7 +40,8 @@ export class StudyPlanController
 
     this.repository.saveRecord(
       repositoryKey,
-      createLearningLoopRecord({
+      appendSucceededRuntimeTrace(
+        createLearningLoopRecord({
         workspace: aggregate.value.workspace,
         tasks: [...(existingRecord?.tasks ?? []), ...aggregate.value.tasks],
         workPlans: [
@@ -63,8 +72,18 @@ export class StudyPlanController
           : [...(existingRecord?.masteryProfiles ?? [])]
         ,
         practiceActivities: [...(existingRecord?.practiceActivities ?? [])],
-        activeReviewSessions: [...(existingRecord?.activeReviewSessions ?? [])]
-      })
+        activeReviewSessions: [...(existingRecord?.activeReviewSessions ?? [])],
+        runtimeTraces: [...(existingRecord?.runtimeTraces ?? [])]
+      }),
+        {
+          seed: aggregate.value.runtimeTrace,
+          producedDomainIds: [
+            ...aggregate.value.tasks.map((task) => task.id),
+            aggregate.value.workPlan.id,
+            aggregate.value.artifact.id
+          ]
+        }
+      )
     );
 
     return ok(this.projector.project(aggregate.value));

@@ -34,7 +34,7 @@ export async function registerPracticeActivityRoutes(
       });
     }
 
-    const result = practiceActivityController.generate({
+    const result = await practiceActivityController.generate({
       ...parsed.data,
       learningLoopId: String((request.params as { id: string }).id)
     });
@@ -58,7 +58,7 @@ export async function registerPracticeActivityRoutes(
       });
     }
 
-    const result = practiceActivityController.complete({
+    const result = await practiceActivityController.complete({
       ...parsed.data,
       practiceActivityId: String((request.params as { id: string }).id)
     });

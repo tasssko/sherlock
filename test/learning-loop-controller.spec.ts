@@ -8,7 +8,7 @@ import { PracticeActivityController } from "../src/modules/practice/PracticeActi
 import { studyDays } from "../src/domain/study/StudySchedule.js";
 
 describe("Learning loop flow", () => {
-  it("uses active review evidence to refresh gaps, update mastery, and adapt the next study plan", () => {
+  it("uses active review evidence to refresh gaps, update mastery, and adapt the next study plan", async () => {
     const repository = new SqliteLearningLoopRepository(":memory:");
     const uploadController = new MasterDataUploadController(repository);
     const assessmentController = new InitialAssessmentController(repository);
@@ -48,7 +48,7 @@ describe("Learning loop flow", () => {
       return;
     }
 
-    const assessment = assessmentController.execute({
+    const assessment = await assessmentController.execute({
       learnerName: "Year 7 learner",
       yearGroup: "Year 7",
       topic: "fractions",
@@ -85,7 +85,7 @@ describe("Learning loop flow", () => {
       initialAssessmentEventTypes.indexOf("initial-assessment.generated")
     );
 
-    const attempt = attemptController.execute({
+    const attempt = await attemptController.execute({
       assessmentId: assessment.value.assessment.id,
       responses: assessment.value.assessment.items.map((item) => ({
         itemId: item.id,
@@ -140,7 +140,7 @@ describe("Learning loop flow", () => {
       attemptEventTypes.indexOf("knowledge-gaps.identified")
     );
 
-    const practice = practiceController.generate({
+    const practice = await practiceController.generate({
       learningLoopId: assessment.value.learningLoop.id,
       kind: "flashcard_set",
       cardCount: 3
@@ -213,7 +213,7 @@ describe("Learning loop flow", () => {
     );
     expect(completion.value.activeReviewSession.reviewIntervalHours).toBe(12);
 
-    const studyPlan = studyPlanController.execute({
+    const studyPlan = await studyPlanController.execute({
       learnerName: "Year 7 learner",
       yearGroup: "Year 7",
       objective: "Build a weekly plan for fractions, forces, and French vocabulary.",
@@ -251,7 +251,7 @@ describe("Learning loop flow", () => {
     });
   });
 
-  it("rejects assessment items that leak answers from visible study material", () => {
+  it("rejects assessment items that leak answers from visible study material", async () => {
     const repository = new SqliteLearningLoopRepository(":memory:");
     const uploadController = new MasterDataUploadController(repository);
     const assessmentController = new InitialAssessmentController(repository);
@@ -268,7 +268,7 @@ describe("Learning loop flow", () => {
       ]
     });
 
-    const result = assessmentController.execute({
+    const result = await assessmentController.execute({
       learnerName: "Year 7 learner",
       yearGroup: "Year 7",
       topic: "fractions",

@@ -10,16 +10,25 @@ import {
   type LearningLoopRepository
 } from "../planning/LearningLoopRepository.js";
 import { AssessmentAttemptEvaluator } from "./AssessmentAttemptEvaluator.js";
+import type { AgentRuntime } from "../runtime/AgentRuntime.js";
+import { FixtureAgentRuntime } from "../runtime/FixtureAgentRuntime.js";
+import { NextActionProjector } from "../learning/NextActionProjector.js";
+import { appendSucceededRuntimeTrace } from "../runtime/RuntimeTraceLedger.js";
 
 export class AssessmentAttemptController
   implements Controller<SubmitAssessmentAttemptCommand, AssessmentAttemptResponse>
 {
+  private readonly evaluator: AssessmentAttemptEvaluator;
+  private readonly nextActionProjector = new NextActionProjector();
+
   constructor(
     private readonly repository: LearningLoopRepository,
-    private readonly evaluator = new AssessmentAttemptEvaluator()
-  ) {}
+    runtime: AgentRuntime = new FixtureAgentRuntime()
+  ) {
+    this.evaluator = new AssessmentAttemptEvaluator(runtime);
+  }
 
-  execute(command: SubmitAssessmentAttemptCommand): Result<AssessmentAttemptResponse> {
+  async execute(command: SubmitAssessmentAttemptCommand): Promise<Result<AssessmentAttemptResponse>> {
     const located = this.repository.findRecordByAssessmentId(command.assessmentId as never);
     if (!located) {
       return err({
@@ -49,7 +58,7 @@ export class AssessmentAttemptController
     }
 
     const events = createDomainEventRecorder(located.record.workspace.id);
-    const evaluation = this.evaluator.evaluate({
+    const evaluation = await this.evaluator.evaluate({
       assessment,
       command,
       events,
@@ -61,7 +70,8 @@ export class AssessmentAttemptController
 
     const newEvents = events.all();
     const workspace = located.record.workspace.appendEventLedger(newEvents.map((event) => event.id));
-    const updatedRecord = createLearningLoopRecord({
+    const updatedRecord = appendSucceededRuntimeTrace(
+      createLearningLoopRecord({
       workspace,
       tasks: [...located.record.tasks],
       workPlans: [...located.record.workPlans],
@@ -77,12 +87,27 @@ export class AssessmentAttemptController
       knowledgeGaps: [...located.record.knowledgeGaps, ...evaluation.value.knowledgeGaps],
       masteryProfiles: [...located.record.masteryProfiles],
       practiceActivities: [...located.record.practiceActivities],
-      activeReviewSessions: [...located.record.activeReviewSessions]
-    });
+      activeReviewSessions: [...located.record.activeReviewSessions],
+      runtimeTraces: [...located.record.runtimeTraces]
+    }),
+      {
+        seed: evaluation.value.runtimeTrace,
+        producedDomainIds: [
+          evaluation.value.attempt.id,
+          evaluation.value.evaluation.id,
+          ...evaluation.value.knowledgeGaps.map((gap) => gap.id)
+        ]
+      }
+    );
 
     this.repository.saveRecord(located.key, updatedRecord);
 
     return ok({
+      learningLoopId: evaluation.value.learningLoop.id,
+      phase: evaluation.value.learningLoop.phase,
+      nextAction: this.nextActionProjector.project({
+        learningLoop: evaluation.value.learningLoop
+      }),
       workspace: workspace.toSnapshot(),
       learningLoop: evaluation.value.learningLoop.toSnapshot(),
       attempt: evaluation.value.attempt.toSnapshot(),

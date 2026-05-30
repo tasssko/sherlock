@@ -19,6 +19,9 @@ import { PracticeActivityTaskAssembler } from "./PracticeActivityTaskAssembler.j
 import { PracticeReviewSchedulingPolicy } from "./PracticeReviewSchedulingPolicy.js";
 import { PracticeSourceSelector } from "./PracticeSourceSelector.js";
 import { WorkspacePracticeActivityAssembler } from "./WorkspacePracticeActivityAssembler.js";
+import type { AgentRuntime } from "../runtime/AgentRuntime.js";
+import { FixtureAgentRuntime } from "../runtime/FixtureAgentRuntime.js";
+import { appendSucceededRuntimeTrace } from "../runtime/RuntimeTraceLedger.js";
 
 export interface PracticeActivityServiceResult {
   aggregate: PracticeActivityAggregate;
@@ -34,15 +37,15 @@ export class PracticeActivityService {
   constructor(
     private readonly sourceSelector: PracticeSourceSelector,
     private readonly taskAssembler = new PracticeActivityTaskAssembler(),
-    private readonly flashcardSetAssembler = new FlashcardSetAssembler(),
+    private readonly flashcardSetAssembler = new FlashcardSetAssembler(new FixtureAgentRuntime()),
     private readonly workspaceAssembler = new WorkspacePracticeActivityAssembler(),
     private readonly reviewSchedulingPolicy = new PracticeReviewSchedulingPolicy()
   ) {}
 
-  generate(
+  async generate(
     command: CreatePracticeActivityCommand,
     record: LearningLoopRecord
-  ): Result<PracticeActivityServiceResult> {
+  ): Promise<Result<PracticeActivityServiceResult>> {
     const learningLoop = record.learningLoops.find(
       (candidate) => candidate.id === (command.learningLoopId as never)
     );
@@ -69,7 +72,7 @@ export class PracticeActivityService {
       yearGroup: record.workspace.learner.yearGroup
     });
     const task = this.taskAssembler.create(context, record.workspace.id, events);
-    const assembled = this.flashcardSetAssembler.assemble({
+    const assembled = await this.flashcardSetAssembler.assemble({
       context,
       events,
       learningLoop,
@@ -96,6 +99,7 @@ export class PracticeActivityService {
       learningLoop,
       practiceActivity: assembled.value.practiceActivity,
       record,
+      runtimeTrace: assembled.value.runtimeTrace,
       task: completedTask.value,
       workspace: record.workspace
     });
@@ -103,7 +107,13 @@ export class PracticeActivityService {
       return aggregate;
     }
 
-    return ok(aggregate.value);
+    return ok({
+      aggregate: aggregate.value.aggregate,
+      record: appendSucceededRuntimeTrace(aggregate.value.record, {
+        seed: assembled.value.runtimeTrace,
+        producedDomainIds: [assembled.value.practiceActivity.id, completedTask.value.id]
+      })
+    });
   }
 
   complete(
@@ -200,7 +210,8 @@ export class PracticeActivityService {
         ...record.practiceActivities.filter((candidate) => candidate.id !== practiceActivity.id),
         updatedPracticeActivity
       ],
-      activeReviewSessions: [...record.activeReviewSessions, activeReviewSession.value]
+      activeReviewSessions: [...record.activeReviewSessions, activeReviewSession.value],
+      runtimeTraces: [...record.runtimeTraces]
     } satisfies LearningLoopRecord;
 
     return ok({

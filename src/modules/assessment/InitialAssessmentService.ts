@@ -10,6 +10,8 @@ import type { InitialAssessmentAggregate } from "./AssessmentProjector.js";
 import { InitialAssessmentAssembler } from "./InitialAssessmentAssembler.js";
 import { MasterDataSourceSelector } from "./MasterDataSourceSelector.js";
 import { WorkspaceAssessmentAssembler } from "./WorkspaceAssessmentAssembler.js";
+import { FixtureAgentRuntime } from "../runtime/FixtureAgentRuntime.js";
+import { appendSucceededRuntimeTrace } from "../runtime/RuntimeTraceLedger.js";
 
 export interface InitialAssessmentServiceResult {
   aggregate: InitialAssessmentAggregate;
@@ -21,14 +23,14 @@ export class InitialAssessmentService {
     private readonly sourceSelector: MasterDataSourceSelector,
     private readonly loopSelector = new LearningLoopSelector(),
     private readonly taskAssembler = new AssessmentTaskAssembler(),
-    private readonly assessmentAssembler = new InitialAssessmentAssembler(),
+    private readonly assessmentAssembler = new InitialAssessmentAssembler(new FixtureAgentRuntime()),
     private readonly workspaceAssembler = new WorkspaceAssessmentAssembler()
   ) {}
 
-  run(
+  async run(
     command: CreateInitialAssessmentCommand,
     record?: LearningLoopRecord
-  ): Result<InitialAssessmentServiceResult> {
+  ): Promise<Result<InitialAssessmentServiceResult>> {
     const sourceSelection = this.sourceSelector.select(command.topic, command.questionCount);
     if (!sourceSelection.ok) {
       return sourceSelection;
@@ -60,7 +62,7 @@ export class InitialAssessmentService {
       sourceName: sourceSelection.value.source.name
     });
     const task = this.taskAssembler.create(context, workspace.id, events);
-    const assembled = this.assessmentAssembler.assemble({
+    const assembled = await this.assessmentAssembler.assemble({
       context,
       events,
       learningLoop,
@@ -83,15 +85,34 @@ export class InitialAssessmentService {
       return completedTask;
     }
 
-    return this.workspaceAssembler.assemble({
+    const assembledWorkspace = this.workspaceAssembler.assemble({
       agent: assembled.value.agent,
       artifact: assembled.value.artifact,
       assessment: assembled.value.assessment,
       events,
       learningLoop,
       record,
+      runtimeTrace: assembled.value.runtimeTrace,
       task: completedTask.value,
       workspace
     });
+    if (!assembledWorkspace.ok) {
+      return assembledWorkspace;
+    }
+
+    return {
+      ok: true,
+      value: {
+        aggregate: assembledWorkspace.value.aggregate,
+        record: appendSucceededRuntimeTrace(assembledWorkspace.value.record, {
+          seed: assembled.value.runtimeTrace,
+          producedDomainIds: [
+            assembled.value.assessment.id,
+            assembled.value.artifact.id,
+            completedTask.value.id
+          ]
+        })
+      }
+    };
   }
 }

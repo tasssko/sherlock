@@ -13,6 +13,7 @@ import type { ArtifactSnapshot } from "../primitives/Artifact.js";
 import type { DomainEvent } from "../primitives/Event.js";
 import type { TaskSnapshot } from "../primitives/Task.js";
 import type { WorkspaceSnapshot } from "../primitives/Workspace.js";
+import type { LearningLoopRouteProjection } from "./NextAction.js";
 
 export interface CreateInitialAssessmentCommand {
   learnerName: string;
@@ -34,7 +35,7 @@ export interface AssessmentArtifactContent {
   items: readonly AssessmentArtifactItem[];
 }
 
-export interface InitialAssessmentResponse {
+export interface InitialAssessmentResponse extends LearningLoopRouteProjection {
   workspace: WorkspaceSnapshot;
   learningLoop: LearningLoopSnapshot;
   agent: AgentSnapshot;
@@ -52,7 +53,7 @@ export interface SubmitAssessmentAttemptCommand {
   }[];
 }
 
-export interface AssessmentAttemptResponse {
+export interface AssessmentAttemptResponse extends LearningLoopRouteProjection {
   workspace: WorkspaceSnapshot;
   learningLoop: LearningLoopSnapshot;
   attempt: AttemptSnapshot;

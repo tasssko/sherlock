@@ -10,6 +10,9 @@ import type { LearningLoopRepository } from "../planning/LearningLoopRepository.
 import { PracticeActivityProjector } from "./PracticeActivityProjector.js";
 import { PracticeActivityService } from "./PracticeActivityService.js";
 import { PracticeSourceSelector } from "./PracticeSourceSelector.js";
+import type { AgentRuntime } from "../runtime/AgentRuntime.js";
+import { FixtureAgentRuntime } from "../runtime/FixtureAgentRuntime.js";
+import { FlashcardSetAssembler } from "./FlashcardSetAssembler.js";
 
 export class PracticeActivityController {
   private readonly service: PracticeActivityService;
@@ -17,12 +20,19 @@ export class PracticeActivityController {
   constructor(
     private readonly repository: LearningLoopRepository,
     service?: PracticeActivityService,
-    private readonly projector = new PracticeActivityProjector()
+    private readonly projector = new PracticeActivityProjector(),
+    runtime: AgentRuntime = new FixtureAgentRuntime()
   ) {
-    this.service = service ?? new PracticeActivityService(new PracticeSourceSelector(repository));
+    this.service =
+      service ??
+      new PracticeActivityService(
+        new PracticeSourceSelector(repository),
+        undefined,
+        new FlashcardSetAssembler(runtime)
+      );
   }
 
-  generate(command: CreatePracticeActivityCommand): Result<PracticeActivityResponse> {
+  async generate(command: CreatePracticeActivityCommand): Promise<Result<PracticeActivityResponse>> {
     const located = this.repository.findRecordByLearningLoopId(command.learningLoopId as never);
     if (!located) {
       return {
@@ -34,7 +44,7 @@ export class PracticeActivityController {
       };
     }
 
-    const generated = this.service.generate(command, located.record);
+    const generated = await this.service.generate(command, located.record);
     if (!generated.ok) {
       return generated;
     }

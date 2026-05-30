@@ -6,7 +6,7 @@ import { SqliteLearningLoopRepository } from "../src/modules/planning/SqliteLear
 import { PracticeActivityController } from "../src/modules/practice/PracticeActivityController.js";
 
 describe("PracticeActivityController", () => {
-  it("cannot generate practice before the learning loop is diagnosed", () => {
+  it("cannot generate practice before the learning loop is diagnosed", async () => {
     const repository = new SqliteLearningLoopRepository(":memory:");
     const uploadController = new MasterDataUploadController(repository);
     const assessmentController = new InitialAssessmentController(repository);
@@ -24,7 +24,7 @@ describe("PracticeActivityController", () => {
       ]
     });
 
-    const assessment = assessmentController.execute({
+    const assessment = await assessmentController.execute({
       learnerName: "Year 7 learner",
       yearGroup: "Year 7",
       topic: "fractions",
@@ -35,7 +35,7 @@ describe("PracticeActivityController", () => {
       return;
     }
 
-    const result = practiceController.generate({
+    const result = await practiceController.generate({
       learningLoopId: assessment.value.learningLoop.id,
       kind: "flashcard_set",
       cardCount: 1
@@ -50,7 +50,7 @@ describe("PracticeActivityController", () => {
     expect(result.error.message).toContain("must be diagnosed");
   });
 
-  it("records active review sessions, remaining gaps, and mastery only from review evidence", () => {
+  it("records active review sessions, remaining gaps, and mastery only from review evidence", async () => {
     const repository = new SqliteLearningLoopRepository(":memory:");
     const uploadController = new MasterDataUploadController(repository);
     const assessmentController = new InitialAssessmentController(repository);
@@ -75,7 +75,7 @@ describe("PracticeActivityController", () => {
       ]
     });
 
-    const assessment = assessmentController.execute({
+    const assessment = await assessmentController.execute({
       learnerName: "Year 7 learner",
       yearGroup: "Year 7",
       topic: "fractions",
@@ -86,7 +86,7 @@ describe("PracticeActivityController", () => {
       return;
     }
 
-    const attempt = attemptController.execute({
+    const attempt = await attemptController.execute({
       assessmentId: assessment.value.assessment.id,
       responses: assessment.value.assessment.items.map((item) => ({
         itemId: item.id,
@@ -99,7 +99,7 @@ describe("PracticeActivityController", () => {
     }
     expect(attempt.value.masteryProfile).toBeUndefined();
 
-    const generated = practiceController.generate({
+    const generated = await practiceController.generate({
       learningLoopId: assessment.value.learningLoop.id,
       kind: "flashcard_set",
       cardCount: 2
@@ -149,7 +149,7 @@ describe("PracticeActivityController", () => {
     );
   });
 
-  it("changes the next review interval based on review performance", () => {
+  it("changes the next review interval based on review performance", async () => {
     const repository = new SqliteLearningLoopRepository(":memory:");
     const uploadController = new MasterDataUploadController(repository);
     const assessmentController = new InitialAssessmentController(repository);
@@ -168,7 +168,7 @@ describe("PracticeActivityController", () => {
       ]
     });
 
-    const assessment = assessmentController.execute({
+    const assessment = await assessmentController.execute({
       learnerName: "Year 7 learner",
       yearGroup: "Year 7",
       topic: "fractions",
@@ -179,7 +179,7 @@ describe("PracticeActivityController", () => {
       return;
     }
 
-    const attempt = attemptController.execute({
+    const attempt = await attemptController.execute({
       assessmentId: assessment.value.assessment.id,
       responses: assessment.value.assessment.items.map((item) => ({
         itemId: item.id,
@@ -191,7 +191,7 @@ describe("PracticeActivityController", () => {
       return;
     }
 
-    const generated = practiceController.generate({
+    const generated = await practiceController.generate({
       learningLoopId: assessment.value.learningLoop.id,
       kind: "flashcard_set",
       cardCount: 1
@@ -237,7 +237,7 @@ describe("PracticeActivityController", () => {
     );
   });
 
-  it("rejects completion without item-level evidence for every practice item", () => {
+  it("rejects completion without item-level evidence for every practice item", async () => {
     const repository = new SqliteLearningLoopRepository(":memory:");
     const uploadController = new MasterDataUploadController(repository);
     const assessmentController = new InitialAssessmentController(repository);
@@ -262,7 +262,7 @@ describe("PracticeActivityController", () => {
       ]
     });
 
-    const assessment = assessmentController.execute({
+    const assessment = await assessmentController.execute({
       learnerName: "Year 7 learner",
       yearGroup: "Year 7",
       topic: "fractions",
@@ -273,7 +273,7 @@ describe("PracticeActivityController", () => {
       return;
     }
 
-    const attempt = attemptController.execute({
+    const attempt = await attemptController.execute({
       assessmentId: assessment.value.assessment.id,
       responses: assessment.value.assessment.items.map((item) => ({
         itemId: item.id,
@@ -285,7 +285,7 @@ describe("PracticeActivityController", () => {
       return;
     }
 
-    const generated = practiceController.generate({
+    const generated = await practiceController.generate({
       learningLoopId: assessment.value.learningLoop.id,
       kind: "flashcard_set",
       cardCount: 2

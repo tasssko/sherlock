@@ -10,6 +10,7 @@ import {
 } from "../../domain/learning/LearningLoop.js";
 import { MasterDataItem, MasterDataSource } from "../../domain/learning/MasterData.js";
 import { PracticeActivity } from "../../domain/learning/PracticeActivity.js";
+import { RuntimeTrace } from "../runtime/RuntimeTrace.js";
 import type { Artifact, ArtifactType } from "../../domain/primitives/Artifact.js";
 import { Artifact as ArtifactEntity } from "../../domain/primitives/Artifact.js";
 import type { DomainEvent } from "../../domain/primitives/Event.js";
@@ -127,6 +128,10 @@ export class SqliteLearningLoopRepository implements LearningLoopRepository {
       .map((row) =>
         ActiveReviewSession.rehydrate(parseSnapshot((row as { snapshot: string }).snapshot))
       );
+    const runtimeTraces = this.database
+      .prepare("select snapshot from runtime_traces where learner_key = ? order by rowid asc")
+      .all(key.value)
+      .map((row) => RuntimeTrace.rehydrate(parseSnapshot((row as { snapshot: string }).snapshot)));
 
     return createLearningLoopRecord({
       workspace,
@@ -141,7 +146,8 @@ export class SqliteLearningLoopRepository implements LearningLoopRepository {
       knowledgeGaps,
       masteryProfiles,
       practiceActivities,
-      activeReviewSessions
+      activeReviewSessions,
+      runtimeTraces
     });
   }
 
@@ -282,6 +288,7 @@ export class SqliteLearningLoopRepository implements LearningLoopRepository {
       this.database.prepare("delete from mastery_profiles where learner_key = ?").run(key.value);
       this.database.prepare("delete from practice_activities where learner_key = ?").run(key.value);
       this.database.prepare("delete from active_review_sessions where learner_key = ?").run(key.value);
+      this.database.prepare("delete from runtime_traces where learner_key = ?").run(key.value);
 
       this.database
         .prepare("insert into workspaces (id, learner_key, snapshot) values (?, ?, ?)")
@@ -389,6 +396,14 @@ export class SqliteLearningLoopRepository implements LearningLoopRepository {
         );
       }
 
+      const insertRuntimeTrace = this.database.prepare(
+        "insert into runtime_traces (id, learner_key, snapshot) values (?, ?, ?)"
+      );
+      for (const runtimeTrace of record.runtimeTraces) {
+        const snapshot = runtimeTrace.toSnapshot();
+        insertRuntimeTrace.run(snapshot.id, key.value, JSON.stringify(snapshot));
+      }
+
       this.database.exec("commit");
     } catch (error) {
       this.database.exec("rollback");
@@ -464,6 +479,11 @@ export class SqliteLearningLoopRepository implements LearningLoopRepository {
         learner_key text not null,
         practice_activity_id text not null,
         learning_loop_id text not null,
+        snapshot text not null
+      );
+      create table if not exists runtime_traces (
+        id text primary key,
+        learner_key text not null,
         snapshot text not null
       );
       create table if not exists master_data_sources (

@@ -217,6 +217,13 @@ export class InitialAssessmentContext {
   facts(): readonly ContextFact<"learner" | "question-count" | "source" | "topic">[] {
     return this.snapshot.knownFacts;
   }
+
+  toSnapshot(): InitialAssessmentContextSnapshot {
+    return {
+      ...this.snapshot,
+      knownFacts: this.snapshot.knownFacts.map((fact) => ({ ...fact }))
+    };
+  }
 }
 
 export class PracticeActivityContext {
@@ -300,5 +307,14 @@ export class PracticeActivityContext {
     "card-count" | "diagnosed-gaps" | "learner" | "learning-loop" | "source" | "topic"
   >[] {
     return this.snapshot.knownFacts;
+  }
+
+  toSnapshot(): PracticeActivityContextSnapshot {
+    return {
+      ...this.snapshot,
+      diagnosedGaps: [...this.snapshot.diagnosedGaps],
+      sourceNames: [...this.snapshot.sourceNames],
+      knownFacts: this.snapshot.knownFacts.map((fact) => ({ ...fact }))
+    };
   }
 }

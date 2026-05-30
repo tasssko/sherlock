@@ -12,6 +12,7 @@ import type { WorkPlanSnapshot } from "../primitives/WorkPlan.js";
 import type { WorkspaceSnapshot } from "../primitives/Workspace.js";
 import type { TaskId } from "../primitives/ids.js";
 import type { StudyDay } from "./StudySchedule.js";
+import type { LearningLoopRouteProjection } from "./NextAction.js";
 
 export interface CreateStudyPlanCommand {
   learnerName: string;
@@ -37,7 +38,7 @@ export interface StudyPlanArtifactContent {
   notes: readonly string[];
 }
 
-export interface StudyPlanResponse {
+export interface StudyPlanResponse extends LearningLoopRouteProjection {
   workspace: WorkspaceSnapshot;
   learningLoop: LearningLoopSnapshot;
   agent: AgentSnapshot;

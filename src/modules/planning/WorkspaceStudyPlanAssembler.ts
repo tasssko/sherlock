@@ -13,6 +13,7 @@ import type { StudyPlanArtifactContent } from "../../domain/study/StudyPlanning.
 import { ok, type Result } from "../../domain/primitives/result.js";
 import type { StudyPlanAggregate } from "./StudyPlanProjector.js";
 import type { Agent } from "../../domain/primitives/Agent.js";
+import type { RuntimeTraceSeed } from "../runtime/RuntimeTrace.js";
 
 export interface WorkspaceStudyPlanAssemblerInput {
   agent: Agent;
@@ -23,6 +24,7 @@ export interface WorkspaceStudyPlanAssemblerInput {
   learningLoop: LearningLoop;
   masteryProfile?: MasteryProfile;
   parentTask: Task;
+  runtimeTrace?: RuntimeTraceSeed;
   workPlan: WorkPlan;
   workspace: Workspace;
 }
@@ -64,7 +66,8 @@ export class WorkspaceStudyPlanAssembler {
       artifact: input.artifact,
       knowledgeGaps: input.knowledgeGaps,
       masteryProfile: input.masteryProfile,
-      events: allEvents
+      events: allEvents,
+      runtimeTrace: input.runtimeTrace
     });
   }
 }

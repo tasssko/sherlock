@@ -15,6 +15,7 @@ export type MasterDataItemId = Brand<string, "MasterDataItemId">;
 export type MasterDataSourceId = Brand<string, "MasterDataSourceId">;
 export type MasteryProfileId = Brand<string, "MasteryProfileId">;
 export type PracticeActivityId = Brand<string, "PracticeActivityId">;
+export type RuntimeTraceId = Brand<string, "RuntimeTraceId">;
 export type TaskId = Brand<string, "TaskId">;
 export type WorkPlanId = Brand<string, "WorkPlanId">;
 export type WorkspaceId = Brand<string, "WorkspaceId">;
@@ -77,6 +78,10 @@ export function createMasteryProfileId(): MasteryProfileId {
 
 export function createPracticeActivityId(): PracticeActivityId {
   return createId("practice") as PracticeActivityId;
+}
+
+export function createRuntimeTraceId(): RuntimeTraceId {
+  return createId("runtime_trace") as RuntimeTraceId;
 }
 
 export function createTaskId(): TaskId {
