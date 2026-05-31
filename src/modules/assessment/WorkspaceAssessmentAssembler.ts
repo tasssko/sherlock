@@ -72,10 +72,14 @@ export class WorkspaceAssessmentAssembler {
         attempts: [...(existingRecord?.attempts ?? [])],
         evaluations: [...(existingRecord?.evaluations ?? [])],
         knowledgeGaps: [...(existingRecord?.knowledgeGaps ?? [])],
+        learnerEvidence: [...(existingRecord?.learnerEvidence ?? [])],
+        masteryStates: [...(existingRecord?.masteryStates ?? [])],
         masteryProfiles: [...(existingRecord?.masteryProfiles ?? [])],
         practiceActivities: [...(existingRecord?.practiceActivities ?? [])],
         activeReviewSessions: [...(existingRecord?.activeReviewSessions ?? [])],
         loopBatches: [...(existingRecord?.loopBatches ?? [])],
+        questionSeeds: [...(existingRecord?.questionSeeds ?? [])],
+        questionVariants: [...(existingRecord?.questionVariants ?? [])],
         runtimeConversationBindings: upsertRuntimeConversationBinding(
           existingRecord?.runtimeConversationBindings ?? [],
           input.runtimeConversationBinding

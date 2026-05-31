@@ -1,11 +1,14 @@
 import type { KnowledgeGap, LearningLoop } from "../../domain/learning/LearningLoop.js";
 import type { MasterDataItem, MasterDataSource } from "../../domain/learning/MasterData.js";
+import type { QuestionSeed, QuestionVariant } from "../../domain/learning/QuestionBank.js";
 import type { LearningLoopRecord, LearningLoopRepository } from "../planning/LearningLoopRepository.js";
 import { err, ok, type Result } from "../../domain/primitives/result.js";
 
 export interface PracticeActivitySelection {
   gap: KnowledgeGap;
   item: MasterDataItem;
+  questionSeed?: QuestionSeed;
+  reviewVariant?: QuestionVariant;
   source: MasterDataSource;
 }
 
@@ -177,6 +180,25 @@ export class PracticeSourceSelector {
       });
     }
 
+    const variantSelections = buildVariantSelections({
+      activeLoopUnit,
+      fallbackCandidates,
+      learningLoop,
+      questionSeeds: record.questionSeeds ?? [],
+      questionVariants: record.questionVariants ?? [],
+      unitGaps
+    });
+    if (variantSelections.length > 0) {
+      const repeatedSelections = Array.from({ length: cardCount }, (_, index) =>
+        variantSelections[index % variantSelections.length]
+      ).filter((selection): selection is PracticeActivitySelection => Boolean(selection));
+      return ok({
+        knowledgeGaps: unitGaps,
+        selections: repeatedSelections,
+        sourceNames: [...new Set(repeatedSelections.map((selection) => selection.source.name))]
+      });
+    }
+
     const selections: PracticeActivitySelection[] = [];
     for (let index = 0; index < cardCount; index += 1) {
       const chosenGap = unitGaps[index % unitGaps.length];
@@ -198,4 +220,92 @@ export class PracticeSourceSelector {
       sourceNames: [...new Set(selections.map((selection) => selection.source.name))]
     });
   }
+}
+
+function buildVariantSelections(input: {
+  activeLoopUnit: {
+    id?: string;
+    focus: string;
+    sourceRefs: readonly string[];
+    targetKnowledgeGapIds: readonly string[];
+  };
+  fallbackCandidates: readonly {
+    item: MasterDataItem;
+    source: MasterDataSource;
+  }[];
+  learningLoop: LearningLoop;
+  questionSeeds: readonly QuestionSeed[];
+  questionVariants: readonly QuestionVariant[];
+  unitGaps: readonly KnowledgeGap[];
+}): readonly PracticeActivitySelection[] {
+  const unitId = input.activeLoopUnit.id;
+  if (!unitId) {
+    return [];
+  }
+
+  const reviewVariants = input.questionVariants
+    .filter(
+      (candidate) =>
+        candidate.learningLoopId === input.learningLoop.id &&
+        candidate.ownerKind === "loop_review_item" &&
+        candidate.ownerId === unitId
+    )
+    .sort((left, right) => left.position - right.position);
+
+  if (reviewVariants.length === 0) {
+    return [];
+  }
+
+  const seedById = new Map(input.questionSeeds.map((seed) => [seed.id, seed]));
+  const selections: PracticeActivitySelection[] = [];
+
+  for (let index = 0; index < reviewVariants.length; index += 1) {
+    const reviewVariant = reviewVariants[index];
+    if (!reviewVariant) {
+      continue;
+    }
+    const variantSnapshot = reviewVariant.toSnapshot();
+    const questionSeed = seedById.get(variantSnapshot.seedId);
+    if (!questionSeed) {
+      continue;
+    }
+
+    const matchedCandidate =
+      input.fallbackCandidates.find(({ item }) =>
+        questionSeed.toSnapshot().sourceRefs.includes(item.sourceRef ?? item.id)
+      ) ?? input.fallbackCandidates[index % input.fallbackCandidates.length];
+    const gap =
+      input.unitGaps.find((candidate) =>
+        questionSeed
+          .toSnapshot()
+          .objectiveRefs.some((objectiveRef) =>
+            sharesAnyToken(candidate.toSnapshot().description, objectiveRef)
+          )
+      ) ?? input.unitGaps[index % input.unitGaps.length];
+
+    if (!matchedCandidate || !gap) {
+      continue;
+    }
+
+    selections.push({
+      gap,
+      item: matchedCandidate.item,
+      questionSeed,
+      reviewVariant,
+      source: matchedCandidate.source
+    });
+  }
+
+  return selections;
+}
+
+function sharesAnyToken(left: string, right: string): boolean {
+  const leftTokens = new Set(tokenize(left));
+  for (const token of tokenize(right)) {
+    if (leftTokens.has(token)) {
+      return true;
+    }
+  }
+
+  return false;
 }

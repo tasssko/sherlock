@@ -7,6 +7,7 @@ import type {
   MasteryProfile
 } from "../../domain/learning/LearningLoop.js";
 import type { PracticeActivity } from "../../domain/learning/PracticeActivity.js";
+import type { QuestionVariant } from "../../domain/learning/QuestionBank.js";
 import type { Artifact } from "../../domain/primitives/Artifact.js";
 import type { DomainEvent } from "../../domain/primitives/Event.js";
 import { TaskGraph } from "../../domain/primitives/TaskGraph.js";
@@ -19,6 +20,7 @@ import type {
 import type { LearningLoopResumeResponse } from "../../domain/study/LearningLoops.js";
 import type { StudyPlanArtifactContent } from "../../domain/study/StudyPlanning.js";
 import { NextActionProjector } from "./NextActionProjector.js";
+import { applyQuestionVariantsToLoopBatch } from "../questions/QuestionBankLoopAdapter.js";
 
 export interface LearningLoopResumeAggregate {
   workspace: Workspace;
@@ -35,6 +37,7 @@ export interface LearningLoopResumeAggregate {
     workPlan: WorkPlan;
   };
   loopBatch?: LearningLoopBatch;
+  questionVariants?: readonly QuestionVariant[];
   practiceActivities: readonly PracticeActivity[];
   currentPracticeActivity?: PracticeActivity;
   latestActiveReviewSession?: ActiveReviewSession;
@@ -74,7 +77,12 @@ export class LearningLoopProjector {
       latestEvaluation: aggregate.latestEvaluation?.toSnapshot(),
       knowledgeGaps: aggregate.knowledgeGaps.map((gap) => gap.toSnapshot()),
       masteryProfile: aggregate.masteryProfile?.toSnapshot(),
-      loopBatch: aggregate.loopBatch?.toSnapshot(),
+      loopBatch: aggregate.loopBatch
+        ? applyQuestionVariantsToLoopBatch(
+            aggregate.loopBatch.toSnapshot(),
+            aggregate.questionVariants ?? []
+          )
+        : undefined,
       studyPlan:
         aggregate.studyPlan && taskGraph
           ? {

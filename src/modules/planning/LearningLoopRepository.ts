@@ -1,5 +1,7 @@
 import type { ActiveReviewSession } from "../../domain/learning/ActiveReviewSession.js";
 import type { Assessment, Attempt, Evaluation } from "../../domain/learning/Assessment.js";
+import type { LearnerEvidence } from "../../domain/learning/LearnerEvidence.js";
+import type { MasteryState } from "../../domain/learning/MasteryState.js";
 import type { LearningLoopBatch } from "../../domain/learning/LearningLoopBatch.js";
 import type {
   KnowledgeGap,
@@ -8,6 +10,7 @@ import type {
 } from "../../domain/learning/LearningLoop.js";
 import type { MasterDataItem, MasterDataSource } from "../../domain/learning/MasterData.js";
 import type { PracticeActivity } from "../../domain/learning/PracticeActivity.js";
+import type { QuestionSeed, QuestionVariant } from "../../domain/learning/QuestionBank.js";
 import type { RuntimeTrace } from "../runtime/RuntimeTrace.js";
 import type { RuntimeConversationBinding } from "../runtime/RuntimeConversationBinding.js";
 import type { Artifact, ArtifactType } from "../../domain/primitives/Artifact.js";
@@ -36,7 +39,11 @@ export interface LearningLoopRecord {
   masteryProfiles: readonly MasteryProfile[];
   practiceActivities: readonly PracticeActivity[];
   activeReviewSessions: readonly ActiveReviewSession[];
+  learnerEvidence?: readonly LearnerEvidence[];
+  masteryStates?: readonly MasteryState[];
   loopBatches: readonly LearningLoopBatch[];
+  questionSeeds?: readonly QuestionSeed[];
+  questionVariants?: readonly QuestionVariant[];
   runtimeConversationBindings: readonly RuntimeConversationBinding[];
   runtimeTraces: readonly RuntimeTrace[];
 }
@@ -56,7 +63,11 @@ export function createLearningLoopRecord(record: LearningLoopRecord): LearningLo
     masteryProfiles: [...record.masteryProfiles],
     practiceActivities: [...record.practiceActivities],
     activeReviewSessions: [...record.activeReviewSessions],
+    learnerEvidence: [...(record.learnerEvidence ?? [])],
+    masteryStates: [...(record.masteryStates ?? [])],
     loopBatches: [...record.loopBatches],
+    questionSeeds: [...(record.questionSeeds ?? [])],
+    questionVariants: [...(record.questionVariants ?? [])],
     runtimeConversationBindings: [...record.runtimeConversationBindings],
     runtimeTraces: [...record.runtimeTraces]
   };

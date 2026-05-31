@@ -9,6 +9,8 @@ import { studyDays } from "../src/domain/study/StudySchedule.js";
 import { LearningLoopController } from "../src/modules/learning/LearningLoopController.js";
 import { LearningLoop } from "../src/domain/learning/LearningLoop.js";
 import { LearningLoopBatch } from "../src/domain/learning/LearningLoopBatch.js";
+import { MasteryState } from "../src/domain/learning/MasteryState.js";
+import { QuestionSeed, QuestionVariant } from "../src/domain/learning/QuestionBank.js";
 import { createDomainEventRecorder } from "../src/domain/primitives/Event.js";
 import { Workspace } from "../src/domain/primitives/Workspace.js";
 import { LearnerWorkspaceKey } from "../src/modules/planning/LearnerWorkspaceKey.js";
@@ -148,6 +150,205 @@ describe("Learning loop flow", () => {
     expect(result.value.learningLoop.status).toBe("completed");
     expect(result.value.nextAction.kind).toBe("track-mastery");
     expect(result.value.loopBatch).toBeUndefined();
+  });
+
+  it("projects loop quick checks from persisted question variants", () => {
+    const repository = new SqliteLearningLoopRepository(":memory:");
+    const workspace = Workspace.create({
+      title: "Variant-backed loop workspace",
+      learner: {
+        name: "Year 7 learner",
+        yearGroup: "Year 7",
+        availableMinutesByDay: {}
+      },
+      activeObjective: "Work through a stronger Coasts loop."
+    });
+    const events = createDomainEventRecorder(workspace.id);
+    const learningLoop = LearningLoop.rehydrate({
+      ...LearningLoop.create(
+        {
+          workspaceId: workspace.id,
+          objective: "Build secure understanding in Coasts.",
+          topic: "Coasts"
+        },
+        events
+      ).toSnapshot(),
+      phase: "loop-batching",
+      status: "active",
+      knowledgeGapIds: ["gap_coasts" as never]
+    });
+    const loopBatch = LearningLoopBatch.create({
+      learningLoopId: learningLoop.id,
+      overview: "Persisted batch.",
+      targetDurationMinutes: 8,
+      units: [
+        {
+          focus: "Erosion",
+          reason: "Focus on a key process.",
+          objectiveRefs: ["objective_erosion"],
+          sourceRefs: ["coasts_ref_1"],
+          shortExplanation: "Waves can erode the coastline over time.",
+          learnerTask: "Explain erosion in your own words.",
+          targetKnowledgeGapIds: ["gap_coasts"],
+          quickCheckQuestions: [{ prompt: "Stale quick-check prompt" }],
+          reviewItems: [{ prompt: "Old review prompt", answer: "Erosion wears away rock." }]
+        }
+      ]
+    });
+    const unit = loopBatch.toSnapshot().units[0];
+    const seed = QuestionSeed.create({
+      learningLoopId: learningLoop.id,
+      topic: "Coasts",
+      focus: "Erosion",
+      objectiveRefs: ["objective_erosion"],
+      sourceRefs: ["coasts_ref_1"],
+      answerModel: "Erosion wears away rock.",
+      explanation: "Waves can erode the coastline over time.",
+      tags: ["Erosion"]
+    });
+    const quickCheckVariant = QuestionVariant.create({
+      seedId: seed.id,
+      learningLoopId: learningLoop.id,
+      ownerId: unit.id,
+      ownerKind: "loop_quick_check",
+      position: 0,
+      mode: "multiple_choice",
+      prompt: "Which statement best describes coastal erosion?",
+      options: [
+        { id: "a", text: "It wears away rock." },
+        { id: "b", text: "It deposits sediment." }
+      ],
+      correctOptionIds: ["a"],
+      hint: "Think about rock being worn away by waves.",
+      sourceFact: "Waves gradually wear away the coastline."
+    });
+    const reviewVariant = QuestionVariant.create({
+      seedId: seed.id,
+      learningLoopId: learningLoop.id,
+      ownerId: unit.id,
+      ownerKind: "loop_review_item",
+      position: 0,
+      mode: "review",
+      prompt: "Recall the precise effect erosion has on the coastline.",
+      expectedAnswer: "Erosion wears away rock."
+    });
+
+    repository.saveRecord(
+      LearnerWorkspaceKey.fromLearner("Year 7 learner", "Year 7"),
+      createLearningLoopRecord({
+        workspace,
+        tasks: [],
+        workPlans: [],
+        artifacts: [],
+        events: [],
+        learningLoops: [learningLoop],
+        assessments: [],
+        attempts: [],
+        evaluations: [],
+        knowledgeGaps: [],
+        masteryProfiles: [],
+        practiceActivities: [],
+        activeReviewSessions: [],
+        loopBatches: [loopBatch],
+        questionSeeds: [seed],
+        questionVariants: [quickCheckVariant, reviewVariant],
+        runtimeConversationBindings: [],
+        runtimeTraces: []
+      })
+    );
+
+    const result = new LearningLoopController(repository).get(learningLoop.id);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      return;
+    }
+
+    expect(result.value.loopBatch?.units[0].quickCheckQuestions[0]).toMatchObject({
+      prompt: "Which statement best describes coastal erosion?",
+      questionType: "multiple_choice",
+      hint: "Think about rock being worn away by waves."
+    });
+    expect(result.value.loopBatch?.units[0].reviewItems[0]).toMatchObject({
+      prompt: "Recall the precise effect erosion has on the coastline.",
+      answer: "Erosion wears away rock."
+    });
+  });
+
+  it("projects mastery from canonical mastery states when no stored mastery profile exists", () => {
+    const repository = new SqliteLearningLoopRepository(":memory:");
+    const workspace = Workspace.create({
+      title: "Mastery projection workspace",
+      learner: {
+        name: "Year 7 learner",
+        yearGroup: "Year 7",
+        availableMinutesByDay: {}
+      },
+      activeObjective: "Resume Coasts with canonical mastery."
+    });
+    const events = createDomainEventRecorder(workspace.id);
+    const learningLoop = LearningLoop.rehydrate({
+      ...LearningLoop.create(
+        {
+          workspaceId: workspace.id,
+          objective: "Build secure understanding in Coasts.",
+          topic: "Coasts"
+        },
+        events
+      ).toSnapshot(),
+      phase: "mastery-tracking",
+      status: "active",
+      masteryProfileId: undefined
+    });
+    const topicMasteryState = MasteryState.create({
+      learningLoopId: learningLoop.id,
+      topic: "Coasts",
+      status: "secure",
+      score: 0.91,
+      lastReviewedAt: "2026-05-30T12:00:00.000Z",
+      nextReviewAt: "2026-06-06T12:00:00.000Z"
+    });
+
+    repository.saveRecord(
+      LearnerWorkspaceKey.fromLearner("Year 7 learner", "Year 7"),
+      createLearningLoopRecord({
+        workspace,
+        tasks: [],
+        workPlans: [],
+        artifacts: [],
+        events: [],
+        learningLoops: [learningLoop],
+        assessments: [],
+        attempts: [],
+        evaluations: [],
+        knowledgeGaps: [],
+        learnerEvidence: [],
+        masteryStates: [topicMasteryState],
+        masteryProfiles: [],
+        practiceActivities: [],
+        activeReviewSessions: [],
+        loopBatches: [],
+        questionSeeds: [],
+        questionVariants: [],
+        runtimeConversationBindings: [],
+        runtimeTraces: []
+      })
+    );
+
+    const result = new LearningLoopController(repository).get(learningLoop.id);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      return;
+    }
+
+    expect(result.value.masteryProfile?.topics).toEqual([
+      expect.objectContaining({
+        topic: "Coasts",
+        status: "secure",
+        score: 0.91
+      })
+    ]);
   });
 
   it("uses active review evidence to refresh gaps, update mastery, and adapt the next study plan", async () => {

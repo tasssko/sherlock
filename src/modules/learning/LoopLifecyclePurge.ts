@@ -241,6 +241,9 @@ export function purgeLearningLoops(
   const knowledgeGaps = record.knowledgeGaps.filter(
     (gap) => !purgeKnowledgeGapIds.has(gap.id)
   );
+  const learnerEvidence = (record.learnerEvidence ?? []).filter(
+    (evidence) => !purgeLoopIds.has(evidence.learningLoopId)
+  );
   const workPlans = record.workPlans.filter((workPlan) => !purgeWorkPlanIds.has(workPlan.id));
   const artifacts = record.artifacts.filter((artifact) => !purgeArtifactIds.has(artifact.id));
   const practiceActivities = record.practiceActivities.filter(
@@ -252,8 +255,17 @@ export function purgeLearningLoops(
   const masteryProfiles = record.masteryProfiles.filter(
     (profile) => !purgeMasteryProfileIds.has(profile.id)
   );
+  const masteryStates = (record.masteryStates ?? []).filter(
+    (state) => !purgeLoopIds.has(state.learningLoopId ?? ("" as never))
+  );
   const loopBatches = record.loopBatches.filter(
     (loopBatch) => !purgeLoopIds.has(loopBatch.learningLoopId)
+  );
+  const questionSeeds = (record.questionSeeds ?? []).filter(
+    (questionSeed) => !purgeLoopIds.has(questionSeed.learningLoopId)
+  );
+  const questionVariants = (record.questionVariants ?? []).filter(
+    (questionVariant) => !purgeLoopIds.has(questionVariant.learningLoopId)
   );
   const runtimeConversationBindings = record.runtimeConversationBindings.filter(
     (binding) => !purgeLoopIds.has(binding.learningLoopId)
@@ -286,10 +298,14 @@ export function purgeLearningLoops(
       attempts,
       evaluations,
       knowledgeGaps,
+      learnerEvidence,
+      masteryStates,
       masteryProfiles,
       practiceActivities,
       activeReviewSessions,
       loopBatches,
+      questionSeeds,
+      questionVariants,
       runtimeConversationBindings,
       runtimeTraces
     })
@@ -318,10 +334,14 @@ export function clearAllLearningLoops(record: LearningLoopRecord): LearningLoopR
     attempts: [],
     evaluations: [],
     knowledgeGaps: [],
+    learnerEvidence: [],
+    masteryStates: [],
     masteryProfiles: [],
     practiceActivities: [],
     activeReviewSessions: [],
     loopBatches: [],
+    questionSeeds: [],
+    questionVariants: [],
     runtimeConversationBindings: [],
     runtimeTraces: []
   });

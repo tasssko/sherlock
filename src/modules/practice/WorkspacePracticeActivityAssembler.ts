@@ -57,10 +57,14 @@ export class WorkspacePracticeActivityAssembler {
         attempts: [...input.record.attempts],
         evaluations: [...input.record.evaluations],
         knowledgeGaps: [...input.record.knowledgeGaps],
+        learnerEvidence: [...(input.record.learnerEvidence ?? [])],
+        masteryStates: [...(input.record.masteryStates ?? [])],
         masteryProfiles: [...input.record.masteryProfiles],
         practiceActivities: [...input.record.practiceActivities, input.practiceActivity],
         activeReviewSessions: [...input.record.activeReviewSessions],
         loopBatches: [...input.record.loopBatches],
+        questionSeeds: [...(input.record.questionSeeds ?? [])],
+        questionVariants: [...(input.record.questionVariants ?? [])],
         runtimeConversationBindings: upsertRuntimeConversationBinding(
           input.record.runtimeConversationBindings,
           input.runtimeConversationBinding

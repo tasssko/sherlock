@@ -2,9 +2,13 @@ import { err, ok, type Result } from "../../domain/primitives/result.js";
 import type { DomainEvent } from "../../domain/primitives/Event.js";
 import { LearningLoop } from "../../domain/learning/LearningLoop.js";
 import type { LearningLoopResumeResponse } from "../../domain/study/LearningLoops.js";
-import type { LearningLoopRepository } from "../planning/LearningLoopRepository.js";
+import type {
+  LearningLoopRecord,
+  LearningLoopRepository
+} from "../planning/LearningLoopRepository.js";
 import type { Task } from "../../domain/primitives/Task.js";
 import { LearningLoopProjector } from "./LearningLoopProjector.js";
+import { projectMasteryProfile } from "../mastery/MasteryStateService.js";
 
 export class LearningLoopController {
   constructor(
@@ -59,9 +63,7 @@ export class LearningLoopController {
     const knowledgeGaps = located.record.knowledgeGaps.filter((candidate) =>
       normalizedLearningLoop.knowledgeGapIds.includes(candidate.id)
     );
-    const masteryProfile = normalizedLearningLoop.masteryProfileId
-      ? located.record.masteryProfiles.find((candidate) => candidate.id === normalizedLearningLoop.masteryProfileId)
-      : undefined;
+    const masteryProfile = projectMasteryProfileForLoop(located.record, normalizedLearningLoop);
     const studyPlanArtifact = located.record.artifacts
       .filter(
         (candidate) =>
@@ -138,6 +140,9 @@ export class LearningLoopController {
         knowledgeGaps,
         masteryProfile,
         loopBatch: projectedLoopBatch,
+        questionVariants: located.record.questionVariants?.filter(
+          (candidate) => candidate.learningLoopId === normalizedLearningLoop.id
+        ),
         studyPlan:
           studyPlanArtifact && workPlan && studyPlanTasks.length > 0
             ? {
@@ -209,6 +214,29 @@ export class LearningLoopController {
       (typeof payload.workPlanId === "string" && input.relatedWorkPlanIds.has(payload.workPlanId))
     );
   }
+}
+
+function projectMasteryProfileForLoop(
+  record: LearningLoopRecord,
+  learningLoop: LearningLoop
+) {
+  const topicStates = (record.masteryStates ?? []).filter(
+    (candidate) =>
+      candidate.learningLoopId === learningLoop.id && candidate.seedId === undefined
+  );
+  if (topicStates.length === 0) {
+    return learningLoop.masteryProfileId
+      ? record.masteryProfiles.find((candidate) => candidate.id === learningLoop.masteryProfileId)
+      : undefined;
+  }
+
+  return projectMasteryProfile({
+    existingProfile: learningLoop.masteryProfileId
+      ? record.masteryProfiles.find((candidate) => candidate.id === learningLoop.masteryProfileId)
+      : undefined,
+    learningLoop,
+    topicStates
+  });
 }
 
 function normalizeLoopForProjection(learningLoop: LearningLoop): LearningLoop {

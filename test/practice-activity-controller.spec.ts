@@ -281,6 +281,7 @@ describe("PracticeActivityController", () => {
       "Recall before flipping each card."
     );
     expect(generated.value.practiceActivity.flashcardSet.cards).toHaveLength(1);
+    expect(generated.value.practiceActivity.flashcardSet.cards[0]?.front).toBe("What is 6/8 simplified?");
   });
 
   it("normalizes relay-style prompt and answer card fields", async () => {
@@ -645,6 +646,29 @@ describe("PracticeActivityController", () => {
       expect.arrayContaining([
         "practice-activity.completed",
         "learning-loop.mastery-profile-updated"
+      ])
+    );
+
+    const stored = repository.findRecordByPracticeActivityId(generated.value.practiceActivity.id as never);
+    expect(stored?.record.learnerEvidence).toHaveLength(2);
+    expect(stored?.record.learnerEvidence?.map((evidence) => evidence.toSnapshot())).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          learningLoopId: assessment.value.learningLoop.id,
+          responseText: expect.any(String),
+          correctness: expect.stringMatching(/correct|incorrect/),
+          supportUsed: "independent"
+        })
+      ])
+    );
+    expect(stored?.record.masteryStates?.map((state) => state.toSnapshot())).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          learningLoopId: assessment.value.learningLoop.id,
+          topic: "fractions",
+          status: "developing",
+          nextReviewAt: expect.any(String)
+        })
       ])
     );
   });

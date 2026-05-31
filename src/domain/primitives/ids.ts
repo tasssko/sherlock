@@ -10,13 +10,17 @@ export type AttemptId = Brand<string, "AttemptId">;
 export type EventId = Brand<string, "EventId">;
 export type EvaluationId = Brand<string, "EvaluationId">;
 export type KnowledgeGapId = Brand<string, "KnowledgeGapId">;
+export type LearnerEvidenceId = Brand<string, "LearnerEvidenceId">;
 export type LearningLoopBatchId = Brand<string, "LearningLoopBatchId">;
 export type LearningLoopId = Brand<string, "LearningLoopId">;
 export type LearningLoopUnitId = Brand<string, "LearningLoopUnitId">;
 export type MasterDataItemId = Brand<string, "MasterDataItemId">;
 export type MasterDataSourceId = Brand<string, "MasterDataSourceId">;
+export type MasteryStateId = Brand<string, "MasteryStateId">;
 export type MasteryProfileId = Brand<string, "MasteryProfileId">;
 export type PracticeActivityId = Brand<string, "PracticeActivityId">;
+export type QuestionSeedId = Brand<string, "QuestionSeedId">;
+export type QuestionVariantId = Brand<string, "QuestionVariantId">;
 export type RuntimeTraceId = Brand<string, "RuntimeTraceId">;
 export type TaskId = Brand<string, "TaskId">;
 export type WorkPlanId = Brand<string, "WorkPlanId">;
@@ -62,6 +66,10 @@ export function createKnowledgeGapId(): KnowledgeGapId {
   return createId("gap") as KnowledgeGapId;
 }
 
+export function createLearnerEvidenceId(): LearnerEvidenceId {
+  return createId("evidence") as LearnerEvidenceId;
+}
+
 export function createLearningLoopBatchId(): LearningLoopBatchId {
   return createId("loop_batch") as LearningLoopBatchId;
 }
@@ -86,8 +94,20 @@ export function createMasteryProfileId(): MasteryProfileId {
   return createId("mastery") as MasteryProfileId;
 }
 
+export function createMasteryStateId(): MasteryStateId {
+  return createId("mastery_state") as MasteryStateId;
+}
+
 export function createPracticeActivityId(): PracticeActivityId {
   return createId("practice") as PracticeActivityId;
+}
+
+export function createQuestionSeedId(): QuestionSeedId {
+  return createId("question_seed") as QuestionSeedId;
+}
+
+export function createQuestionVariantId(): QuestionVariantId {
+  return createId("question_variant") as QuestionVariantId;
 }
 
 export function createRuntimeTraceId(): RuntimeTraceId {

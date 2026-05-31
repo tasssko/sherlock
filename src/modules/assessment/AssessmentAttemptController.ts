@@ -17,6 +17,10 @@ import { FixtureAgentRuntime } from "../runtime/FixtureAgentRuntime.js";
 import { NextActionProjector } from "../learning/NextActionProjector.js";
 import { appendSucceededRuntimeTrace } from "../runtime/RuntimeTraceLedger.js";
 import { upsertRuntimeConversationBinding } from "../runtime/RuntimeConversationBinding.js";
+import {
+  applyQuestionVariantsToLoopBatch,
+  deriveQuestionBankFromLoopBatch
+} from "../questions/QuestionBankLoopAdapter.js";
 
 export class AssessmentAttemptController
   implements Controller<SubmitAssessmentAttemptCommand, AssessmentAttemptResponse>
@@ -114,12 +118,16 @@ export class AssessmentAttemptController
           attempts: [...located.record.attempts, evaluation.value.attempt],
           evaluations: [...located.record.evaluations, evaluation.value.evaluation],
           knowledgeGaps: [...located.record.knowledgeGaps],
+          learnerEvidence: [...(located.record.learnerEvidence ?? [])],
+          masteryStates: [...(located.record.masteryStates ?? [])],
           masteryProfiles: [...located.record.masteryProfiles],
           practiceActivities: [...located.record.practiceActivities],
           activeReviewSessions: [...located.record.activeReviewSessions],
           loopBatches: located.record.loopBatches.filter(
             (candidate) => candidate.learningLoopId !== securedLearningLoop.id
           ),
+          questionSeeds: [...(located.record.questionSeeds ?? [])],
+          questionVariants: [...(located.record.questionVariants ?? [])],
           runtimeConversationBindings: upsertRuntimeConversationBinding(
             located.record.runtimeConversationBindings,
             evaluation.value.runtimeConversationBinding
@@ -176,6 +184,11 @@ export class AssessmentAttemptController
       targetDurationMinutes: loopBatchCandidate.value.targetDurationMinutes,
       units: loopBatchCandidate.value.units
     });
+    const derivedQuestionBank = deriveQuestionBankFromLoopBatch({
+      learningLoopId: evaluation.value.learningLoop.id,
+      topic: materialInterpretation.mainTopic,
+      loopBatch: loopBatch.toSnapshot()
+    });
 
     const newEvents = events.all();
     const workspace = located.record.workspace.appendEventLedger(newEvents.map((event) => event.id));
@@ -195,6 +208,8 @@ export class AssessmentAttemptController
       attempts: [...located.record.attempts, evaluation.value.attempt],
       evaluations: [...located.record.evaluations, evaluation.value.evaluation],
       knowledgeGaps: [...located.record.knowledgeGaps, ...evaluation.value.knowledgeGaps],
+      learnerEvidence: [...(located.record.learnerEvidence ?? [])],
+      masteryStates: [...(located.record.masteryStates ?? [])],
       masteryProfiles: [...located.record.masteryProfiles],
       practiceActivities: [...located.record.practiceActivities],
       activeReviewSessions: [...located.record.activeReviewSessions],
@@ -203,6 +218,18 @@ export class AssessmentAttemptController
           (candidate) => candidate.learningLoopId !== evaluation.value.learningLoop.id
         ),
         loopBatch
+      ],
+      questionSeeds: [
+        ...(located.record.questionSeeds?.filter(
+          (candidate) => candidate.learningLoopId !== evaluation.value.learningLoop.id
+        ) ?? []),
+        ...derivedQuestionBank.questionSeeds
+      ],
+      questionVariants: [
+        ...(located.record.questionVariants?.filter(
+          (candidate) => candidate.learningLoopId !== evaluation.value.learningLoop.id
+        ) ?? []),
+        ...derivedQuestionBank.questionVariants
       ],
       runtimeConversationBindings: upsertRuntimeConversationBinding(
         located.record.runtimeConversationBindings,
@@ -240,7 +267,10 @@ export class AssessmentAttemptController
       attempt: evaluation.value.attempt.toSnapshot(),
       evaluation: evaluation.value.evaluation.toSnapshot(),
       knowledgeGaps: evaluation.value.knowledgeGaps.map((gap) => gap.toSnapshot()),
-      loopBatch: loopBatch.toSnapshot(),
+      loopBatch: applyQuestionVariantsToLoopBatch(
+        loopBatch.toSnapshot(),
+        derivedQuestionBank.questionVariants
+      ),
       events: newEvents
     });
   }

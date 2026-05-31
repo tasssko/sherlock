@@ -250,7 +250,10 @@ function buildAssessmentOptions<
 
   const correctOptionText =
     item.term ?? item.person ?? item.date ?? correctPhrases[0] ?? itemAnswerText;
-  const distractorTexts = shuffleSeeded(otherPhrases, `${item.id}:multiple-choice`).slice(0, 3);
+  const distractorTexts = unique([
+    ...shuffleSeeded(otherPhrases, `${item.id}:multiple-choice`).slice(0, 3),
+    ...buildSyntheticDistractors(item, correctOptionText)
+  ]).filter((value) => normalize(value) !== normalize(correctOptionText));
   if (correctOptionText && distractorTexts.length >= 2) {
     const options: AssessmentOption[] = shuffleSeeded(
       [
@@ -274,6 +277,34 @@ function buildAssessmentOptions<
   return {
     questionType: "free_form"
   };
+}
+
+function buildSyntheticDistractors<
+  TItem extends {
+    itemType?: string;
+    person?: string;
+    subtopic?: string;
+    term?: string;
+    topic: string;
+  }
+>(item: TItem, correctOptionText: string): readonly string[] {
+  const focus = item.term ?? item.person ?? item.subtopic ?? item.topic;
+  const synthetic = [
+    item.itemType === "person"
+      ? `${focus} was mainly known for something else.`
+      : undefined,
+    item.itemType === "key_term"
+      ? `${focus} means a different idea in ${item.topic}.`
+      : undefined,
+    item.itemType === "date"
+      ? `${focus} links to a different event in ${item.topic}.`
+      : undefined,
+    `A different detail from ${item.topic}.`,
+    `${focus} is explained in another way.`,
+    `An example that does not match ${focus}.`
+  ].filter((value): value is string => Boolean(value));
+
+  return synthetic.filter((value) => normalize(value) !== normalize(correctOptionText));
 }
 
 function buildLoopQuickCheck(
@@ -307,8 +338,8 @@ function buildLoopQuickCheck(
 ): {
   prompt: string;
   questionType?: AssessmentQuestionType;
-  options?: readonly AssessmentOption[];
-  correctOptionIds?: readonly string[];
+  options?: AssessmentOption[];
+  correctOptionIds?: string[];
   hint?: string;
   sourceFact?: string;
 } {
@@ -329,8 +360,8 @@ function buildLoopQuickCheck(
   return {
     prompt: sourceRef ? `${prompt} [Source: ${item.sourceRef}]` : prompt,
     questionType: questionShape.questionType,
-    options: questionShape.options,
-    correctOptionIds: questionShape.correctOptionIds,
+    options: questionShape.options?.map((option) => ({ ...option })),
+    correctOptionIds: questionShape.correctOptionIds ? [...questionShape.correctOptionIds] : undefined,
     hint: `Hint${sourceRef}: ${sourceFact}`,
     sourceFact
   };

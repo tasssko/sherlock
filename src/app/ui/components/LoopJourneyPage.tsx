@@ -638,6 +638,7 @@ function useLoopQuickCheckAnswers(loopState: LearningLoopResumeResponse | null) 
   const activeUnit = currentLoopUnit(loopState);
   const [answers, setAnswers] = useState<Record<string, LoopQuickCheckDraft>>({});
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
+  const currentQuestion = activeUnit?.quickCheckQuestions[currentQuestionIndex];
 
   useEffect(() => {
     setAnswers(
@@ -656,7 +657,7 @@ function useLoopQuickCheckAnswers(loopState: LearningLoopResumeResponse | null) 
     setCurrentQuestionIndex(0);
   }, [activeUnit?.id]);
 
-  return { activeUnit, answers, currentQuestionIndex, setAnswers, setCurrentQuestionIndex };
+  return { activeUnit, answers, currentQuestion, currentQuestionIndex, setAnswers, setCurrentQuestionIndex };
 }
 
 function buildLoopQuickCheckAnswerText(
@@ -786,6 +787,7 @@ export function LoopJourneyPage(props: LoopJourneyPageProps) {
   const {
     activeUnit,
     answers: loopQuickCheckAnswers,
+    currentQuestion: currentLoopQuickCheck,
     currentQuestionIndex: currentLoopQuickCheckIndex,
     setAnswers: setLoopQuickCheckAnswers,
     setCurrentQuestionIndex: setCurrentLoopQuickCheckIndex
@@ -1280,11 +1282,11 @@ export function LoopJourneyPage(props: LoopJourneyPageProps) {
                             "The next short loops will appear here."}
                         </p>
                         {activeUnit ? (
-                          <section className="assessment-game">
-                            <div className="assessment-progress">
-                              <div className="assessment-track" aria-hidden="true">
+                          <section className="quiz-game">
+                            <div className="quiz-progress">
+                              <div className="quiz-track" aria-hidden="true">
                                 <div
-                                  className="assessment-track-fill"
+                                  className="quiz-track-fill"
                                   style={{
                                     width: `${((currentLoopQuickCheckIndex + 1) / Math.max(activeUnit.quickCheckQuestions.length, 1)) * 100}%`
                                   }}
@@ -1296,29 +1298,23 @@ export function LoopJourneyPage(props: LoopJourneyPageProps) {
                               </span>
                             </div>
 
-                            {activeUnit.quickCheckQuestions[currentLoopQuickCheckIndex] ? (
-                              <div className="assessment-card">
+                            {currentLoopQuickCheck ? (
+                              <div className="quiz-card">
                                 <p className="subtle-heading">{activeUnit.focus}</p>
-                                <p className="list-title">
-                                  {activeUnit.quickCheckQuestions[currentLoopQuickCheckIndex].prompt}
-                                </p>
+                                <p className="list-title">{currentLoopQuickCheck.prompt}</p>
                                 <p className="hint">
-                                  {quickCheckQuestionTypeLabel(
-                                    activeUnit.quickCheckQuestions[currentLoopQuickCheckIndex]
-                                  )}
+                                  {quickCheckQuestionTypeLabel(currentLoopQuickCheck)}
                                 </p>
 
-                                {activeUnit.quickCheckQuestions[currentLoopQuickCheckIndex].questionType === "multiple_choice" ||
-                                activeUnit.quickCheckQuestions[currentLoopQuickCheckIndex].questionType === "multiple_select" ? (
-                                  <div className="assessment-options">
-                                    {(activeUnit.quickCheckQuestions[currentLoopQuickCheckIndex].options ?? []).map((option) => {
-                                      const isMulti =
-                                        activeUnit.quickCheckQuestions[currentLoopQuickCheckIndex].questionType ===
-                                        "multiple_select";
+                                {currentLoopQuickCheck.questionType === "multiple_choice" ||
+                                currentLoopQuickCheck.questionType === "multiple_select" ? (
+                                  <div className="quiz-options">
+                                    {(currentLoopQuickCheck.options ?? []).map((option) => {
+                                      const isMulti = currentLoopQuickCheck.questionType === "multiple_select";
                                       const selected =
-                                        loopQuickCheckAnswers[
-                                          activeUnit.quickCheckQuestions[currentLoopQuickCheckIndex].id
-                                        ]?.selectedOptionIds.includes(option.id) ?? false;
+                                        loopQuickCheckAnswers[currentLoopQuickCheck.id]?.selectedOptionIds.includes(
+                                          option.id
+                                        ) ?? false;
 
                                       return (
                                         <button
@@ -1328,8 +1324,7 @@ export function LoopJourneyPage(props: LoopJourneyPageProps) {
                                           data-option-selected={selected}
                                           onClick={() =>
                                             setLoopQuickCheckAnswers((current) => {
-                                              const questionId =
-                                                activeUnit.quickCheckQuestions[currentLoopQuickCheckIndex].id;
+                                              const questionId = currentLoopQuickCheck.id;
                                               const existing = current[questionId] ?? {
                                                 answerText: "",
                                                 checked: false,
@@ -1363,21 +1358,14 @@ export function LoopJourneyPage(props: LoopJourneyPageProps) {
                                     Your answer
                                     <textarea
                                       rows={3}
-                                      value={
-                                        loopQuickCheckAnswers[
-                                          activeUnit.quickCheckQuestions[currentLoopQuickCheckIndex].id
-                                        ]?.answerText ?? ""
-                                      }
+                                      value={loopQuickCheckAnswers[currentLoopQuickCheck.id]?.answerText ?? ""}
                                       onChange={(event) =>
                                         setLoopQuickCheckAnswers((current) => ({
                                           ...current,
-                                          [activeUnit.quickCheckQuestions[currentLoopQuickCheckIndex].id]: {
+                                          [currentLoopQuickCheck.id]: {
                                             answerText: event.target.value,
                                             checked: false,
-                                            hintShown:
-                                              current[
-                                                activeUnit.quickCheckQuestions[currentLoopQuickCheckIndex].id
-                                              ]?.hintShown ?? false,
+                                            hintShown: current[currentLoopQuickCheck.id]?.hintShown ?? false,
                                             selectedOptionIds: []
                                           }
                                         }))
@@ -1386,27 +1374,19 @@ export function LoopJourneyPage(props: LoopJourneyPageProps) {
                                   </label>
                                 )}
 
-                                <div className="assessment-utility-row">
+                                <div className="quiz-utility-row">
                                   <button
                                     type="button"
                                     className="secondary-cta"
                                     onClick={() =>
                                       setLoopQuickCheckAnswers((current) => ({
                                         ...current,
-                                        [activeUnit.quickCheckQuestions[currentLoopQuickCheckIndex].id]: {
-                                          answerText:
-                                            current[
-                                              activeUnit.quickCheckQuestions[currentLoopQuickCheckIndex].id
-                                            ]?.answerText ?? "",
-                                          checked:
-                                            current[
-                                              activeUnit.quickCheckQuestions[currentLoopQuickCheckIndex].id
-                                            ]?.checked ?? false,
+                                        [currentLoopQuickCheck.id]: {
+                                          answerText: current[currentLoopQuickCheck.id]?.answerText ?? "",
+                                          checked: current[currentLoopQuickCheck.id]?.checked ?? false,
                                           hintShown: true,
                                           selectedOptionIds:
-                                            current[
-                                              activeUnit.quickCheckQuestions[currentLoopQuickCheckIndex].id
-                                            ]?.selectedOptionIds ?? []
+                                            current[currentLoopQuickCheck.id]?.selectedOptionIds ?? []
                                         }
                                       }))
                                     }
@@ -1418,29 +1398,19 @@ export function LoopJourneyPage(props: LoopJourneyPageProps) {
                                     className="secondary-cta"
                                     disabled={
                                       !loopQuickCheckAnswerProvided(
-                                        activeUnit.quickCheckQuestions[currentLoopQuickCheckIndex],
-                                        loopQuickCheckAnswers[
-                                          activeUnit.quickCheckQuestions[currentLoopQuickCheckIndex].id
-                                        ]
+                                        currentLoopQuickCheck,
+                                        loopQuickCheckAnswers[currentLoopQuickCheck.id]
                                       )
                                     }
                                     onClick={() =>
                                       setLoopQuickCheckAnswers((current) => ({
                                         ...current,
-                                        [activeUnit.quickCheckQuestions[currentLoopQuickCheckIndex].id]: {
-                                          answerText:
-                                            current[
-                                              activeUnit.quickCheckQuestions[currentLoopQuickCheckIndex].id
-                                            ]?.answerText ?? "",
+                                        [currentLoopQuickCheck.id]: {
+                                          answerText: current[currentLoopQuickCheck.id]?.answerText ?? "",
                                           checked: true,
-                                          hintShown:
-                                            current[
-                                              activeUnit.quickCheckQuestions[currentLoopQuickCheckIndex].id
-                                            ]?.hintShown ?? false,
+                                          hintShown: current[currentLoopQuickCheck.id]?.hintShown ?? false,
                                           selectedOptionIds:
-                                            current[
-                                              activeUnit.quickCheckQuestions[currentLoopQuickCheckIndex].id
-                                            ]?.selectedOptionIds ?? []
+                                            current[currentLoopQuickCheck.id]?.selectedOptionIds ?? []
                                         }
                                       }))
                                     }
@@ -1449,57 +1419,47 @@ export function LoopJourneyPage(props: LoopJourneyPageProps) {
                                   </button>
                                 </div>
 
-                                {loopQuickCheckAnswers[
-                                  activeUnit.quickCheckQuestions[currentLoopQuickCheckIndex].id
-                                ]?.hintShown ? (
-                                  <div className="assessment-hint">
+                                {loopQuickCheckAnswers[currentLoopQuickCheck.id]?.hintShown ? (
+                                  <div className="quiz-hint">
                                     <p className="subtle-heading">Hint</p>
                                     <p>
-                                      {activeUnit.quickCheckQuestions[currentLoopQuickCheckIndex].hint ??
-                                        activeUnit.quickCheckQuestions[currentLoopQuickCheckIndex].sourceFact ??
+                                      {currentLoopQuickCheck.hint ??
+                                        currentLoopQuickCheck.sourceFact ??
                                         activeUnit.shortExplanation}
                                     </p>
                                   </div>
                                 ) : null}
 
-                                {loopQuickCheckAnswers[
-                                  activeUnit.quickCheckQuestions[currentLoopQuickCheckIndex].id
-                                ]?.checked ? (
+                                {loopQuickCheckAnswers[currentLoopQuickCheck.id]?.checked ? (
                                   <div
-                                    className="assessment-feedback"
+                                    className="quiz-feedback"
                                     data-feedback-tone={
                                       loopQuickCheckFeedbackCopy(
-                                        activeUnit.quickCheckQuestions[currentLoopQuickCheckIndex],
-                                        loopQuickCheckAnswers[
-                                          activeUnit.quickCheckQuestions[currentLoopQuickCheckIndex].id
-                                        ]
+                                        currentLoopQuickCheck,
+                                        loopQuickCheckAnswers[currentLoopQuickCheck.id]
                                       ).tone
                                     }
                                   >
                                     <p className="subtle-heading">
                                       {
                                         loopQuickCheckFeedbackCopy(
-                                          activeUnit.quickCheckQuestions[currentLoopQuickCheckIndex],
-                                          loopQuickCheckAnswers[
-                                            activeUnit.quickCheckQuestions[currentLoopQuickCheckIndex].id
-                                          ]
+                                          currentLoopQuickCheck,
+                                          loopQuickCheckAnswers[currentLoopQuickCheck.id]
                                         ).title
                                       }
                                     </p>
                                     <p>
                                       {
                                         loopQuickCheckFeedbackCopy(
-                                          activeUnit.quickCheckQuestions[currentLoopQuickCheckIndex],
-                                          loopQuickCheckAnswers[
-                                            activeUnit.quickCheckQuestions[currentLoopQuickCheckIndex].id
-                                          ]
+                                          currentLoopQuickCheck,
+                                          loopQuickCheckAnswers[currentLoopQuickCheck.id]
                                         ).body
                                       }
                                     </p>
                                   </div>
                                 ) : null}
 
-                                <div className="assessment-nav">
+                                <div className="quiz-nav">
                                   <button
                                     type="button"
                                     className="secondary-cta"
@@ -1510,7 +1470,7 @@ export function LoopJourneyPage(props: LoopJourneyPageProps) {
                                   >
                                     Back
                                   </button>
-                                  <div className="assessment-dots">
+                                  <div className="quiz-dots">
                                     {activeUnit.quickCheckQuestions.map((question, index) => {
                                       const draft = loopQuickCheckAnswers[question.id];
                                       const dotState =
@@ -1526,7 +1486,7 @@ export function LoopJourneyPage(props: LoopJourneyPageProps) {
                                         <button
                                           key={question.id}
                                           type="button"
-                                          className="assessment-dot"
+                                          className="quiz-dot"
                                           data-dot-state={dotState}
                                           onClick={() => setCurrentLoopQuickCheckIndex(index)}
                                         />

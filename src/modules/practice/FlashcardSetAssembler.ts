@@ -1,5 +1,6 @@
 import { PracticeActivity } from "../../domain/learning/PracticeActivity.js";
 import type { MasterDataItem } from "../../domain/learning/MasterData.js";
+import type { QuestionSeed, QuestionVariant } from "../../domain/learning/QuestionBank.js";
 import type { PracticeActivityContext } from "../../domain/primitives/Context.js";
 import type { DomainEventRecorder } from "../../domain/primitives/Event.js";
 import type { Task } from "../../domain/primitives/Task.js";
@@ -14,6 +15,7 @@ import { PracticeActivityQualityValidator } from "./PracticeActivityQualityValid
 import type { PracticeActivitySelection } from "./PracticeSourceSelector.js";
 import type { AgentRuntime } from "../runtime/AgentRuntime.js";
 import { FixtureAgentRuntime } from "../runtime/FixtureAgentRuntime.js";
+import { OpenAIStudyIntelligence } from "../runtime/OpenAIStudyIntelligence.js";
 import type { RuntimeTraceSeed } from "../runtime/RuntimeTrace.js";
 import type { RuntimeConversationBinding } from "../runtime/RuntimeConversationBinding.js";
 
@@ -25,10 +27,16 @@ export interface FlashcardSetAssembly {
 }
 
 export class FlashcardSetAssembler {
+  private readonly preferSeedVariants: boolean;
+
   constructor(
     private readonly runtime: AgentRuntime = new FixtureAgentRuntime(),
     private readonly qualityValidator = new PracticeActivityQualityValidator()
-  ) {}
+  ) {
+    this.preferSeedVariants =
+      runtime instanceof FixtureAgentRuntime ||
+      runtime instanceof OpenAIStudyIntelligence;
+  }
 
   async assemble(input: {
     context: PracticeActivityContext;
@@ -40,24 +48,48 @@ export class FlashcardSetAssembler {
     task: Task;
     workspace: Workspace;
   }): Promise<Result<FlashcardSetAssembly>> {
-    const generated = await this.runtime.generatePracticeActivity({
-      context: input.context,
-      learningLoopId: input.learningLoop.id,
-      materialInterpretation: input.materialInterpretation,
-      selections: input.selections.map(({ gap, item }) => ({
-        gap: {
-          id: gap.id,
-          description: gap.toSnapshot().description
-        },
-        item
-      })),
-      runtimeConversationBinding: input.runtimeConversationBinding
-    });
-    if (!generated.ok) {
+    const seededFlashcardSet = this.preferSeedVariants
+      ? buildSeededFlashcardSet(input.selections)
+      : undefined;
+    const validatedSeededFlashcardSet = seededFlashcardSet
+      ? this.validateSeededFlashcardSet(seededFlashcardSet)
+      : undefined;
+    const generated = seededFlashcardSet
+      ? validatedSeededFlashcardSet
+        ? undefined
+        : await this.runtime.generatePracticeActivity({
+            context: input.context,
+            learningLoopId: input.learningLoop.id,
+            materialInterpretation: input.materialInterpretation,
+            selections: input.selections.map(({ gap, item }) => ({
+              gap: {
+                id: gap.id,
+                description: gap.toSnapshot().description
+              },
+              item
+            })),
+            runtimeConversationBinding: input.runtimeConversationBinding
+          })
+      : await this.runtime.generatePracticeActivity({
+          context: input.context,
+          learningLoopId: input.learningLoop.id,
+          materialInterpretation: input.materialInterpretation,
+          selections: input.selections.map(({ gap, item }) => ({
+            gap: {
+              id: gap.id,
+              description: gap.toSnapshot().description
+            },
+            item
+          })),
+          runtimeConversationBinding: input.runtimeConversationBinding
+        });
+    if (generated && !generated.ok) {
       return generated;
     }
 
-    const flashcardSet = normalizeFlashcardSet(generated.value as unknown, input.selections);
+    const flashcardSet = validatedSeededFlashcardSet
+      ? ok(validatedSeededFlashcardSet)
+      : normalizeFlashcardSet(generated?.value as unknown, input.selections);
     if (!flashcardSet.ok) {
       return flashcardSet;
     }
@@ -99,10 +131,58 @@ export class FlashcardSetAssembler {
         sourceMasterDataItemIds: input.selections.map(({ item }) => item.id),
         flashcardSet: normalizedFlashcardSet
       }),
-      runtimeConversationBinding: generated.value.runtimeConversationBinding,
-      runtimeTrace: generated.value.runtimeTrace
+      runtimeConversationBinding: generated?.value.runtimeConversationBinding,
+      runtimeTrace: generated?.value.runtimeTrace
     });
   }
+
+  private validateSeededFlashcardSet(flashcardSet: FlashcardSet): FlashcardSet | undefined {
+    const validatedCards = this.qualityValidator.validate(flashcardSet.cards);
+    if (!validatedCards.ok) {
+      return undefined;
+    }
+
+    return {
+      instructions: flashcardSet.instructions,
+      cards: validatedCards.value
+    };
+  }
+}
+
+function buildSeededFlashcardSet(
+  selections: readonly PracticeActivitySelection[]
+): FlashcardSet | undefined {
+  const seededSelections = selections.filter(
+    (selection): selection is PracticeActivitySelection & {
+      questionSeed: QuestionSeed;
+      reviewVariant: QuestionVariant;
+    } => Boolean(selection.questionSeed && selection.reviewVariant)
+  );
+
+  if (seededSelections.length === 0 || seededSelections.length !== selections.length) {
+    return undefined;
+  }
+
+  return {
+    instructions:
+      "Answer each card from memory first, then flip to compare with the model answer and explanation.",
+    cards: seededSelections.map(({ gap, item, questionSeed, reviewVariant }, index) => {
+      const seedSnapshot = questionSeed.toSnapshot();
+      const variantSnapshot = reviewVariant.toSnapshot();
+
+      return {
+        id: `${variantSnapshot.id}::${index + 1}`,
+        front: variantSnapshot.prompt,
+        back: variantSnapshot.expectedAnswer ?? seedSnapshot.answerModel,
+        topic: item.topic,
+        knowledgeGapId: gap.id,
+        learningObjective: seedSnapshot.objectiveRefs[0] ?? gap.toSnapshot().description,
+        sourceMasterDataItemId: item.id,
+        sourceVisibleSentence:
+          item.visibleMaterial || item.content || seedSnapshot.explanation || `Review ${seedSnapshot.focus}.`
+      };
+    })
+  };
 }
 
 function normalizeFlashcardSet(

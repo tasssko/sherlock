@@ -19,7 +19,10 @@
     "dev:api": "tsx src/app/api/server.ts",
     "dev:frontend": "vite --host 127.0.0.1 --port 4174",
     "start:api": "node dist/app/api/server.js",
-    "smoke:relay": "tsx scripts/relay-smoke.ts"
+    "smoke:relay": "tsx scripts/relay-smoke.ts",
+    "loops:repair": "tsx scripts/repair-learning-loops.ts",
+    "loops:purge": "node --import tsx/esm scripts/purge-learning-loops.ts",
+    "loops:clear": "node --import tsx/esm scripts/clear-learning-loops.ts"
   },
   "dependencies": {
     "fastify": "^5.3.3",

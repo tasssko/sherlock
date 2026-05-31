@@ -1,6 +1,6 @@
 # Sherlock
 
-Sherlock is a TypeScript study-planning foundation aligned to the existing StackTrack Relay technical direction: Vite for the frontend, Fastify for the API, explicit domain primitives, and thin transport layers.
+Sherlock is a TypeScript learning-loop application: Vite for the frontend, Fastify for the API, explicit domain primitives, and thin transport layers.
 
 ## Stack
 
@@ -23,16 +23,38 @@ pnpm dev:frontend
 The API runs on `http://127.0.0.1:3001` in the local example setup.
 The Vite app runs on `http://127.0.0.1:4174`.
 
-Fixture mode is the default and requires no Relay environment.
-
-Relay mode requires only:
+MVP runtime options:
 
 ```bash
-LOOP_STUDY_AGENT_RUNTIME=relay
-LOOP_STUDY_RELAY_API_URL=http://127.0.0.1:3000
+LOOP_STUDY_INTELLIGENCE=fixture
 ```
 
-The default loop.study Relay runtime profile provisions the workspace, capability routes, controller, and policy automatically.
+`fixture` is the default for tests and local development. It requires no external config.
+
+```bash
+LOOP_STUDY_INTELLIGENCE=openai
+OPENAI_API_KEY=...
+```
+
+`openai` is the live MVP path. It keeps the full learner journey inside `loop.study` and does not require any Relay workspace or task setup.
+
+Optional OpenAI overrides:
+
+```bash
+LOOP_STUDY_OPENAI_MODEL=gpt-4.1-mini
+LOOP_STUDY_OPENAI_BASE_URL=https://api.openai.com/v1
+```
+
+## Experimental Relay
+
+Relay is no longer part of the primary MVP golden path. It remains available as an experimental adapter only.
+
+Experimental Relay mode requires:
+
+```bash
+LOOP_STUDY_INTELLIGENCE=relay
+LOOP_STUDY_RELAY_API_URL=http://127.0.0.1:3000
+```
 
 Optional advanced overrides:
 
@@ -42,22 +64,22 @@ LOOP_STUDY_RELAY_WORKSPACE_ID=workspace_study_advisor
 LOOP_STUDY_RELAY_TEMPLATE_PATH=/absolute/path/to/profile.json
 ```
 
-Legacy `SHERLOCK_AGENT_RUNTIME` and `RELAY_*` variables still work through a deprecated compatibility layer, but the preferred surface is the `LOOP_STUDY_*` contract above.
+Legacy `SHERLOCK_AGENT_RUNTIME`, `LOOP_STUDY_AGENT_RUNTIME`, and `RELAY_*` variables still work through a deprecated compatibility layer, but the preferred surface is the `LOOP_STUDY_INTELLIGENCE` contract above.
 
-For local Relay-backed development:
+For experimental Relay-backed development:
 
 ```bash
 ./scripts/dev-relay.sh
 ```
 
-For a Relay bridge smoke check against the canonical demo corpus:
+For an experimental Relay bridge smoke check against the canonical demo corpus:
 
 ```bash
 pnpm smoke:relay
 pnpm smoke:relay -- coasts
 ```
 
-For an optional live Relay material-intake smoke, provide the normal Relay env plus:
+For an optional live Relay material-intake smoke, provide the experimental Relay env plus:
 
 ```bash
 LOOP_STUDY_RUN_LIVE_RELAY_SMOKE=1 pnpm test:relay:live-intake
@@ -113,6 +135,7 @@ pnpm build
 - [Relay architecture notes](docs/relay/architecture.md)
 - [Sherlock overview](docs/sherlock/overview.md)
 - [Sherlock architecture](docs/sherlock/architecture.md)
+- [Sherlock data model](docs/sherlock/data-model.md)
 
 ## Intentionally Deferred
 

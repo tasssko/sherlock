@@ -4,6 +4,7 @@ import { createDomainEventRecorder } from "../../domain/primitives/Event.js";
 import { err, type Result } from "../../domain/primitives/result.js";
 import type { CreateStudyPlanCommand } from "../../domain/study/StudyPlanning.js";
 import { LearningLoopSelector } from "../learning/LearningLoopSelector.js";
+import type { LearningLoop } from "../../domain/learning/LearningLoop.js";
 import type { LearningLoopRecord } from "./LearningLoopRepository.js";
 import type { StudyPlanAggregate } from "./StudyPlanProjector.js";
 import { StudyPlanAdaptation } from "./StudyPlanAdaptation.js";
@@ -16,9 +17,9 @@ import {
 import { WorkspaceStudyPlanAssembler } from "./WorkspaceStudyPlanAssembler.js";
 import type { AgentRuntime } from "../runtime/AgentRuntime.js";
 import { FixtureAgentRuntime } from "../runtime/FixtureAgentRuntime.js";
-import { appendSucceededRuntimeTrace } from "../runtime/RuntimeTraceLedger.js";
 import type { RuntimeConversationBinding } from "../runtime/RuntimeConversationBinding.js";
 import type { MasterDataInterpretationCandidate } from "../masterData/MasterDataInterpretation.js";
+import { projectMasteryProfile } from "../mastery/MasteryStateService.js";
 
 export interface GenerateStudyPlanInput {
   command: CreateStudyPlanCommand;
@@ -57,9 +58,9 @@ export class StudyPlanGenerationService {
     const loopKnowledgeGaps =
       input.existingRecord?.knowledgeGaps.filter((gap) => learningLoop.knowledgeGapIds.includes(gap.id)) ??
       [];
-    const masteryProfile = input.existingRecord?.masteryProfiles.find(
-      (candidate) => candidate.id === learningLoop.toSnapshot().masteryProfileId
-    );
+    const masteryProfile = input.existingRecord
+      ? projectMasteryProfileForLoop(input.existingRecord, learningLoop)
+      : undefined;
     const activeReviewSessions =
       input.existingRecord?.activeReviewSessions.filter(
         (candidate) => candidate.toSnapshot().learningLoopId === learningLoop.id
@@ -174,4 +175,24 @@ export class StudyPlanGenerationService {
       }
     };
   }
+}
+
+function projectMasteryProfileForLoop(record: LearningLoopRecord, learningLoop: LearningLoop) {
+  const topicStates = (record.masteryStates ?? []).filter(
+    (candidate) =>
+      candidate.learningLoopId === learningLoop.id && candidate.seedId === undefined
+  );
+  if (topicStates.length === 0) {
+    return learningLoop.masteryProfileId
+      ? record.masteryProfiles.find((candidate) => candidate.id === learningLoop.masteryProfileId)
+      : undefined;
+  }
+
+  return projectMasteryProfile({
+    existingProfile: learningLoop.masteryProfileId
+      ? record.masteryProfiles.find((candidate) => candidate.id === learningLoop.masteryProfileId)
+      : undefined,
+    learningLoop,
+    topicStates
+  });
 }

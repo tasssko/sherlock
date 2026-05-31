@@ -18,6 +18,10 @@ import { FixtureAgentRuntime } from "../runtime/FixtureAgentRuntime.js";
 import { appendSucceededRuntimeTrace } from "../runtime/RuntimeTraceLedger.js";
 import { upsertRuntimeConversationBinding } from "../runtime/RuntimeConversationBinding.js";
 import type { MasterDataInterpretationCandidate } from "../masterData/MasterDataInterpretation.js";
+import {
+  applyQuestionVariantsToLoopBatch,
+  deriveQuestionBankFromLoopBatch
+} from "../questions/QuestionBankLoopAdapter.js";
 
 export class InitialLoopBatchController
   implements Controller<CreateInitialLoopBatchCommand, InitialLoopBatchResponse>
@@ -125,6 +129,11 @@ export class InitialLoopBatchController
     const currentTargetGapIds =
       loopBatch.firstActionableUnit()?.targetKnowledgeGapIds ?? plannedGaps.slice(0, 1).map((gap) => gap.id);
     learningLoop = activeLoop.identifyKnowledgeGaps(currentTargetGapIds, events);
+    const derivedQuestionBank = deriveQuestionBankFromLoopBatch({
+      learningLoopId: activeLoop.id,
+      topic: interpretation.mainTopic,
+      loopBatch: loopBatch.toSnapshot()
+    });
 
     const newEvents = events.all();
     const nextWorkspace = workspace.appendEventLedger(newEvents.map((event) => event.id));
@@ -148,6 +157,8 @@ export class InitialLoopBatchController
           ) ?? []),
           ...plannedGaps
         ],
+        learnerEvidence: [...(effectiveRecord?.learnerEvidence ?? [])],
+        masteryStates: [...(effectiveRecord?.masteryStates ?? [])],
         masteryProfiles: [...(effectiveRecord?.masteryProfiles ?? [])],
         practiceActivities: [...(effectiveRecord?.practiceActivities ?? [])],
         activeReviewSessions: [...(effectiveRecord?.activeReviewSessions ?? [])],
@@ -156,6 +167,18 @@ export class InitialLoopBatchController
             (candidate) => candidate.learningLoopId !== learningLoop.id
           ) ?? []),
           loopBatch
+        ],
+        questionSeeds: [
+          ...(effectiveRecord?.questionSeeds?.filter(
+            (candidate) => candidate.learningLoopId !== learningLoop.id
+          ) ?? []),
+          ...derivedQuestionBank.questionSeeds
+        ],
+        questionVariants: [
+          ...(effectiveRecord?.questionVariants?.filter(
+            (candidate) => candidate.learningLoopId !== learningLoop.id
+          ) ?? []),
+          ...derivedQuestionBank.questionVariants
         ],
         runtimeConversationBindings: upsertRuntimeConversationBinding(
           effectiveRecord?.runtimeConversationBindings ?? [],
@@ -181,7 +204,10 @@ export class InitialLoopBatchController
       workspace: nextWorkspace.toSnapshot(),
       learningLoop: learningLoop.toSnapshot(),
       knowledgeGaps: plannedGaps.map((gap) => gap.toSnapshot()),
-      loopBatch: loopBatch.toSnapshot(),
+      loopBatch: applyQuestionVariantsToLoopBatch(
+        loopBatch.toSnapshot(),
+        derivedQuestionBank.questionVariants
+      ),
       events: newEvents
     });
   }

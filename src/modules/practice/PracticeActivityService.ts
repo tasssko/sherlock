@@ -1,9 +1,16 @@
 import { ActiveReviewSession } from "../../domain/learning/ActiveReviewSession.js";
-import { KnowledgeGap, MasteryProfile } from "../../domain/learning/LearningLoop.js";
+import { LearnerEvidence } from "../../domain/learning/LearnerEvidence.js";
+import {
+  KnowledgeGap,
+  LearningLoop,
+  MasteryProfile
+} from "../../domain/learning/LearningLoop.js";
+import type { QuestionVariant } from "../../domain/learning/QuestionBank.js";
 import type { PracticeActivity } from "../../domain/learning/PracticeActivity.js";
 import { PracticeActivityContext } from "../../domain/primitives/Context.js";
 import { createDomainEventRecorder } from "../../domain/primitives/Event.js";
 import type { KnowledgeGapId } from "../../domain/primitives/ids.js";
+import type { QuestionVariantId } from "../../domain/primitives/ids.js";
 import { err, ok, type Result } from "../../domain/primitives/result.js";
 import type {
   CompletePracticeActivityCommand,
@@ -19,6 +26,7 @@ import { PracticeActivityTaskAssembler } from "./PracticeActivityTaskAssembler.j
 import { PracticeReviewSchedulingPolicy } from "./PracticeReviewSchedulingPolicy.js";
 import { PracticeSourceSelector } from "./PracticeSourceSelector.js";
 import { WorkspacePracticeActivityAssembler } from "./WorkspacePracticeActivityAssembler.js";
+import { MasteryStateService } from "../mastery/MasteryStateService.js";
 import type { AgentRuntime } from "../runtime/AgentRuntime.js";
 import { FixtureAgentRuntime } from "../runtime/FixtureAgentRuntime.js";
 import { appendSucceededRuntimeTrace } from "../runtime/RuntimeTraceLedger.js";
@@ -40,7 +48,8 @@ export class PracticeActivityService {
     private readonly taskAssembler = new PracticeActivityTaskAssembler(),
     private readonly flashcardSetAssembler = new FlashcardSetAssembler(new FixtureAgentRuntime()),
     private readonly workspaceAssembler = new WorkspacePracticeActivityAssembler(),
-    private readonly reviewSchedulingPolicy = new PracticeReviewSchedulingPolicy()
+    private readonly reviewSchedulingPolicy = new PracticeReviewSchedulingPolicy(),
+    private readonly masteryStateService = new MasteryStateService()
   ) {}
 
   async generate(
@@ -191,6 +200,16 @@ export class PracticeActivityService {
       learningLoop,
       record
     });
+    const currentLoopUnitId = record.loopBatches
+      .find((candidate) => candidate.learningLoopId === learningLoop.id)
+      ?.firstActionableUnit()?.id;
+    const learnerEvidence = this.buildLearnerEvidenceFromPractice({
+      activeReviewSession: activeReviewSession.value,
+      currentLoopUnitId,
+      learningLoop,
+      practiceActivity,
+      record
+    });
     const completedLoopBatch = record.loopBatches
       .find((candidate) => candidate.learningLoopId === learningLoop.id)
       ?.completeCurrentUnit();
@@ -210,11 +229,21 @@ export class PracticeActivityService {
       },
       events
     );
-    let masteryProfile =
-      record.masteryProfiles.find((candidate) => candidate.id === learningLoop.masteryProfileId) ??
-      MasteryProfile.create(learningLoop.id);
-    masteryProfile = this.updateMasteryFromPractice(masteryProfile, activeReviewSession.value);
-    updatedLoop = updatedLoop.attachMasteryProfile(masteryProfile.id, events);
+    const masteryUpdate = this.masteryStateService.update({
+      existingStates: record.masteryStates ?? [],
+      learningLoop,
+      newEvidence: learnerEvidence,
+      questionSeeds: (record.questionSeeds ?? []).filter(
+        (candidate) => candidate.learningLoopId === learningLoop.id
+      ),
+      existingProfile: record.masteryProfiles.find(
+        (candidate) => candidate.id === learningLoop.masteryProfileId
+      )
+    });
+    const masteryProfile = masteryUpdate.masteryProfile;
+    if (masteryProfile) {
+      updatedLoop = updatedLoop.attachMasteryProfile(masteryProfile.id, events);
+    }
 
     const newEvents = events.all();
     const workspace = record.workspace.appendEventLedger(newEvents.map((event) => event.id));
@@ -232,15 +261,19 @@ export class PracticeActivityService {
       attempts: [...record.attempts],
       evaluations: [...record.evaluations],
       knowledgeGaps: refreshedKnowledgeGaps.knowledgeGaps,
-      masteryProfiles: [
-        ...record.masteryProfiles.filter((candidate) => candidate.id !== masteryProfile.id),
-        masteryProfile
-      ],
+      masteryProfiles: masteryProfile
+        ? [
+            ...record.masteryProfiles.filter((candidate) => candidate.id !== masteryProfile.id),
+            masteryProfile
+          ]
+        : [...record.masteryProfiles],
+      masteryStates: [...masteryUpdate.masteryStates],
       practiceActivities: [
         ...record.practiceActivities.filter((candidate) => candidate.id !== practiceActivity.id),
         updatedPracticeActivity
       ],
       activeReviewSessions: [...record.activeReviewSessions, activeReviewSession.value],
+      learnerEvidence: [...(record.learnerEvidence ?? []), ...learnerEvidence],
       loopBatches: completedLoopBatch
         ? [
             ...record.loopBatches.filter((candidate) => candidate.learningLoopId !== learningLoop.id),
@@ -258,32 +291,10 @@ export class PracticeActivityService {
         activeReviewSession: activeReviewSession.value,
         learningLoop: updatedLoop,
         practiceActivity: updatedPracticeActivity,
-        masteryProfile,
+        masteryProfile: masteryProfile ?? MasteryProfile.create(learningLoop.id),
         events: newEvents
       }
     });
-  }
-
-  private updateMasteryFromPractice(
-    masteryProfile: MasteryProfile,
-    activeReviewSession: ActiveReviewSession
-  ): MasteryProfile {
-    const topicScores = new Map<string, { confident: number; total: number }>();
-
-    for (const result of activeReviewSession.itemResults) {
-      const current = topicScores.get(result.topic) ?? { confident: 0, total: 0 };
-      topicScores.set(result.topic, {
-        confident: current.confident + (result.correct && result.confidence === "high" ? 1 : 0),
-        total: current.total + 1
-      });
-    }
-
-    let nextProfile = masteryProfile;
-    for (const [topic, score] of topicScores.entries()) {
-      nextProfile = nextProfile.recordTopicScore(topic, score.confident / score.total);
-    }
-
-    return nextProfile;
   }
 
   private refreshKnowledgeGapsFromPractice(input: {
@@ -325,4 +336,103 @@ export class PracticeActivityService {
       remainingKnowledgeGapIds: refreshedTargetedGaps.map((gap) => gap.id)
     };
   }
+
+  private buildLearnerEvidenceFromPractice(input: {
+    activeReviewSession: ActiveReviewSession;
+    currentLoopUnitId?: string;
+    learningLoop: LearningLoop;
+    practiceActivity: PracticeActivity;
+    record: LearningLoopRecord;
+  }): readonly LearnerEvidence[] {
+    const variantById = new Map(
+      (input.record.questionVariants ?? [])
+        .filter((candidate) => candidate.learningLoopId === input.learningLoop.id)
+        .map((candidate) => [candidate.id, candidate])
+    );
+    const seedById = new Map(
+      (input.record.questionSeeds ?? [])
+        .filter((candidate) => candidate.learningLoopId === input.learningLoop.id)
+        .map((candidate) => [candidate.id, candidate])
+    );
+    const fallbackReviewVariants = (input.record.questionVariants ?? []).filter(
+      (candidate) =>
+        candidate.learningLoopId === input.learningLoop.id &&
+        candidate.ownerKind === "loop_review_item" &&
+        candidate.ownerId === (input.currentLoopUnitId as never)
+    );
+    const sourceId = input.learningLoop.toSnapshot().sourceIds[0];
+
+    return input.activeReviewSession.itemResults.flatMap((result) => {
+      const variant = resolveQuestionVariant({
+        expectedAnswer: result.expectedAnswer,
+        fallbackReviewVariants,
+        practiceItemId: result.practiceItemId,
+        variantById
+      });
+      if (!variant) {
+        return [];
+      }
+
+      const variantSnapshot = variant.toSnapshot();
+      const seed = seedById.get(variantSnapshot.seedId);
+      if (!seed) {
+        return [];
+      }
+
+      return [
+        LearnerEvidence.create({
+          workspaceId: input.learningLoop.workspaceId,
+          learningLoopId: input.learningLoop.id,
+          loopUnitId: input.currentLoopUnitId as never,
+          seedId: seed.id,
+          variantId: variant.id,
+          sourceId: sourceId as never,
+          responseText: result.responseText,
+          confidence: result.confidence,
+          correctness: result.correct ? "correct" : "incorrect",
+          supportUsed: "independent",
+          feedbackSummary: result.expectedAnswer
+        })
+      ];
+    });
+  }
+}
+
+function extractQuestionVariantId(practiceItemId: string): QuestionVariantId | undefined {
+  if (!practiceItemId) {
+    return undefined;
+  }
+
+  const [variantId] = practiceItemId.split("::");
+  return (variantId?.trim() || undefined) as QuestionVariantId | undefined;
+}
+
+function resolveQuestionVariant(input: {
+  expectedAnswer: string;
+  fallbackReviewVariants: readonly QuestionVariant[];
+  practiceItemId: string;
+  variantById: Map<QuestionVariantId, QuestionVariant>;
+}) {
+  const directVariantId = extractQuestionVariantId(input.practiceItemId);
+  if (directVariantId) {
+    const directVariant = input.variantById.get(directVariantId);
+    if (directVariant) {
+      return directVariant;
+    }
+  }
+
+  const expectedAnswer = normalizeAnswerText(input.expectedAnswer);
+  if (!expectedAnswer) {
+    return input.fallbackReviewVariants[0];
+  }
+
+  return (
+    input.fallbackReviewVariants.find(
+      (candidate) => normalizeAnswerText(candidate.toSnapshot().expectedAnswer) === expectedAnswer
+    ) ?? input.fallbackReviewVariants[0]
+  );
+}
+
+function normalizeAnswerText(value: string | undefined): string {
+  return (value ?? "").trim().toLowerCase();
 }
