@@ -25,6 +25,7 @@
     "loops:clear": "node --import tsx/esm scripts/clear-learning-loops.ts"
   },
   "dependencies": {
+    "drizzle-orm": "^0.45.2",
     "fastify": "^5.3.3",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",

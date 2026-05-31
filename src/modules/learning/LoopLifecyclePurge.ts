@@ -264,6 +264,12 @@ export function purgeLearningLoops(
   const questionSeeds = (record.questionSeeds ?? []).filter(
     (questionSeed) => !purgeLoopIds.has(questionSeed.learningLoopId)
   );
+  const loopUnits = (record.loopUnits ?? []).filter(
+    (loopUnit) => !purgeLoopIds.has(loopUnit.learningLoopId)
+  );
+  const loopUnitQuestionAssignments = (record.loopUnitQuestionAssignments ?? []).filter(
+    (assignment) => !purgeLoopIds.has(assignment.learningLoopId)
+  );
   const questionVariants = (record.questionVariants ?? []).filter(
     (questionVariant) => !purgeLoopIds.has(questionVariant.learningLoopId)
   );
@@ -304,6 +310,8 @@ export function purgeLearningLoops(
       practiceActivities,
       activeReviewSessions,
       loopBatches,
+      loopUnits,
+      loopUnitQuestionAssignments,
       questionSeeds,
       questionVariants,
       runtimeConversationBindings,
@@ -340,6 +348,8 @@ export function clearAllLearningLoops(record: LearningLoopRecord): LearningLoopR
     practiceActivities: [],
     activeReviewSessions: [],
     loopBatches: [],
+    loopUnits: [],
+    loopUnitQuestionAssignments: [],
     questionSeeds: [],
     questionVariants: [],
     runtimeConversationBindings: [],

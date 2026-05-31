@@ -2,6 +2,9 @@
 
 This document defines the canonical product data model for `loop.study`.
 
+Related note:
+- [Canonical Authority Boundaries](./canonical-authority.md)
+
 The goal is to make three things explicit:
 
 1. what the product actually persists as source of truth

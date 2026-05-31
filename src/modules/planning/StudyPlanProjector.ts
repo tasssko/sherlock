@@ -3,6 +3,7 @@ import type {
   LearningLoop,
   MasteryProfile
 } from "../../domain/learning/LearningLoop.js";
+import type { MasteryState } from "../../domain/learning/MasteryState.js";
 import type { Agent } from "../../domain/primitives/Agent.js";
 import type { Artifact } from "../../domain/primitives/Artifact.js";
 import type { DomainEvent } from "../../domain/primitives/Event.js";
@@ -18,6 +19,7 @@ import type {
 import { NextActionProjector } from "../learning/NextActionProjector.js";
 import type { RuntimeTraceSeed } from "../runtime/RuntimeTrace.js";
 import type { RuntimeConversationBinding } from "../runtime/RuntimeConversationBinding.js";
+import { projectMasteryProfile as projectCanonicalMasteryProfile } from "../mastery/MasteryStateService.js";
 
 export interface StudyPlanAggregate {
   workspace: Workspace;
@@ -30,6 +32,7 @@ export interface StudyPlanAggregate {
   artifact: Artifact<StudyPlanArtifactContent, "study-plan">;
   knowledgeGaps: readonly KnowledgeGap[];
   masteryProfile?: MasteryProfile;
+  masteryStates?: readonly MasteryState[];
   events: readonly DomainEvent[];
   runtimeConversationBinding?: RuntimeConversationBinding;
   runtimeTrace?: RuntimeTraceSeed;
@@ -39,6 +42,7 @@ export class StudyPlanProjector {
   private readonly nextActionProjector = new NextActionProjector();
 
   project(aggregate: StudyPlanAggregate): StudyPlanResponse {
+    const projectedMasteryProfile = this.projectMasteryProfile(aggregate);
     return {
       learningLoopId: aggregate.learningLoop.id,
       phase: aggregate.learningLoop.phase,
@@ -55,11 +59,31 @@ export class StudyPlanProjector {
       workPlan: aggregate.workPlan.toSnapshot(),
       artifact: aggregate.artifact.toSnapshot(),
       knowledgeGaps: aggregate.knowledgeGaps.map((gap) => gap.toSnapshot()),
-      masteryProfile: aggregate.masteryProfile?.toSnapshot(),
+      masteryProfile: projectedMasteryProfile?.toSnapshot(),
       events: aggregate.events.map((event) => ({
         ...event,
         payload: { ...event.payload }
       })) as readonly DomainEvent[]
     };
+  }
+
+  private projectMasteryProfile(aggregate: StudyPlanAggregate): MasteryProfile | undefined {
+    const topicStates = (aggregate.masteryStates ?? []).filter(
+      (candidate) =>
+        candidate.learningLoopId === aggregate.learningLoop.id &&
+        candidate.toSnapshot().seedId === undefined
+    );
+    if (topicStates.length === 0) {
+      // Study-plan responses should surface canonical topic mastery when it is
+      // available. The stored mastery profile is preserved only as a
+      // compatibility projection fallback.
+      return aggregate.masteryProfile;
+    }
+
+    return projectCanonicalMasteryProfile({
+      existingProfile: aggregate.masteryProfile,
+      learningLoop: aggregate.learningLoop,
+      topicStates
+    });
   }
 }

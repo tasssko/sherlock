@@ -7,14 +7,21 @@ import { SqliteLearningLoopRepository } from "../src/modules/planning/SqliteLear
 import { PracticeActivityController } from "../src/modules/practice/PracticeActivityController.js";
 import { studyDays } from "../src/domain/study/StudySchedule.js";
 import { LearningLoopController } from "../src/modules/learning/LearningLoopController.js";
-import { LearningLoop } from "../src/domain/learning/LearningLoop.js";
+import { LearningLoopProjector } from "../src/modules/learning/LearningLoopProjector.js";
+import { LearningLoop, MasteryProfile } from "../src/domain/learning/LearningLoop.js";
 import { LearningLoopBatch } from "../src/domain/learning/LearningLoopBatch.js";
+import { LoopUnit } from "../src/domain/learning/LoopUnit.js";
 import { MasteryState } from "../src/domain/learning/MasteryState.js";
+import { PracticeActivity } from "../src/domain/learning/PracticeActivity.js";
 import { QuestionSeed, QuestionVariant } from "../src/domain/learning/QuestionBank.js";
 import { createDomainEventRecorder } from "../src/domain/primitives/Event.js";
 import { Workspace } from "../src/domain/primitives/Workspace.js";
 import { LearnerWorkspaceKey } from "../src/modules/planning/LearnerWorkspaceKey.js";
 import { createLearningLoopRecord } from "../src/modules/planning/LearningLoopRepository.js";
+import { LearnerEvidence } from "../src/domain/learning/LearnerEvidence.js";
+import {
+  deriveCanonicalLoopStructure
+} from "../src/modules/questions/QuestionBankLoopAdapter.js";
 
 describe("Learning loop flow", () => {
   it("does not resume a superseded learning loop", () => {
@@ -232,6 +239,30 @@ describe("Learning loop flow", () => {
       prompt: "Recall the precise effect erosion has on the coastline.",
       expectedAnswer: "Erosion wears away rock."
     });
+    const canonicalLoopStructure = deriveCanonicalLoopStructure({
+      learningLoopId: learningLoop.id,
+      loopBatch: loopBatch.toSnapshot(),
+      questionVariants: [quickCheckVariant, reviewVariant]
+    });
+    const expectedProjection = new LearningLoopProjector().project({
+      workspace,
+      learningLoop,
+      currentAssessment: undefined,
+      assessmentArtifact: undefined,
+      latestAttempt: undefined,
+      latestEvaluation: undefined,
+      knowledgeGaps: [],
+      masteryProfile: undefined,
+      studyPlan: undefined,
+      loopBatch,
+      loopUnits: canonicalLoopStructure.loopUnits,
+      loopUnitQuestionAssignments: canonicalLoopStructure.loopUnitQuestionAssignments,
+      questionVariants: [quickCheckVariant, reviewVariant],
+      practiceActivities: [],
+      currentPracticeActivity: undefined,
+      latestActiveReviewSession: undefined,
+      events: []
+    });
 
     repository.saveRecord(
       LearnerWorkspaceKey.fromLearner("Year 7 learner", "Year 7"),
@@ -250,6 +281,8 @@ describe("Learning loop flow", () => {
         practiceActivities: [],
         activeReviewSessions: [],
         loopBatches: [loopBatch],
+        loopUnits: canonicalLoopStructure.loopUnits,
+        loopUnitQuestionAssignments: canonicalLoopStructure.loopUnitQuestionAssignments,
         questionSeeds: [seed],
         questionVariants: [quickCheckVariant, reviewVariant],
         runtimeConversationBindings: [],
@@ -264,12 +297,203 @@ describe("Learning loop flow", () => {
       return;
     }
 
+    expect(result.value).toEqual(expectedProjection);
     expect(result.value.loopBatch?.units[0].quickCheckQuestions[0]).toMatchObject({
       prompt: "Which statement best describes coastal erosion?",
       questionType: "multiple_choice",
       hint: "Think about rock being worn away by waves."
     });
     expect(result.value.loopBatch?.units[0].reviewItems[0]).toMatchObject({
+      prompt: "Recall the precise effect erosion has on the coastline.",
+      answer: "Erosion wears away rock."
+    });
+  });
+
+  it("keeps projected loop output stable when compatibility batch prompts are stale but canonical state is valid", () => {
+    const buildFixture = (learnerName: string, stalePrompt: string, staleReview: string, staleAnswer: string) => {
+      const workspace = Workspace.create({
+        title: `${learnerName} workspace`,
+        learner: {
+          name: learnerName,
+          yearGroup: "Year 7",
+          availableMinutesByDay: {}
+        },
+        activeObjective: "Project the same canonical loop."
+      });
+      const events = createDomainEventRecorder(workspace.id);
+      const learningLoop = LearningLoop.rehydrate({
+        ...LearningLoop.create(
+          {
+            workspaceId: workspace.id,
+            objective: "Build secure understanding in Coasts.",
+            topic: "Coasts"
+          },
+          events
+        ).toSnapshot(),
+        phase: "loop-batching",
+        status: "active",
+        knowledgeGapIds: ["gap_coasts" as never]
+      });
+      const loopBatch = LearningLoopBatch.create({
+        learningLoopId: learningLoop.id,
+        overview: "Compatibility wrapper stays the same.",
+        targetDurationMinutes: 8,
+        units: [
+          {
+            focus: "Erosion",
+            reason: "Focus on a key process.",
+            objectiveRefs: ["objective_erosion"],
+            sourceRefs: ["coasts_ref_1"],
+            shortExplanation: "Waves can erode the coastline over time.",
+            learnerTask: "Explain erosion in your own words.",
+            targetKnowledgeGapIds: ["gap_coasts"],
+            quickCheckQuestions: [{ prompt: stalePrompt }],
+            reviewItems: [{ prompt: staleReview, answer: staleAnswer }]
+          }
+        ]
+      });
+      const unit = loopBatch.toSnapshot().units[0]!;
+      const seed = QuestionSeed.create({
+        learningLoopId: learningLoop.id,
+        topic: "Coasts",
+        focus: "Erosion",
+        objectiveRefs: ["objective_erosion"],
+        sourceRefs: ["coasts_ref_1"],
+        answerModel: "Erosion wears away rock.",
+        explanation: "Waves can erode the coastline over time.",
+        tags: ["Erosion"]
+      });
+      const quickCheckVariant = QuestionVariant.create({
+        seedId: seed.id,
+        learningLoopId: learningLoop.id,
+        ownerId: unit.id,
+        ownerKind: "loop_quick_check",
+        position: 0,
+        mode: "multiple_choice",
+        prompt: "Which statement best describes coastal erosion?",
+        options: [
+          { id: "a", text: "It wears away rock." },
+          { id: "b", text: "It deposits sediment." }
+        ],
+        correctOptionIds: ["a"],
+        hint: "Think about rock being worn away by waves.",
+        sourceFact: "Waves gradually wear away the coastline."
+      });
+      const reviewVariant = QuestionVariant.create({
+        seedId: seed.id,
+        learningLoopId: learningLoop.id,
+        ownerId: unit.id,
+        ownerKind: "loop_review_item",
+        position: 0,
+        mode: "review",
+        prompt: "Recall the precise effect erosion has on the coastline.",
+        expectedAnswer: "Erosion wears away rock."
+      });
+      const canonicalLoopStructure = deriveCanonicalLoopStructure({
+        learningLoopId: learningLoop.id,
+        loopBatch: loopBatch.toSnapshot(),
+        questionVariants: [quickCheckVariant, reviewVariant]
+      });
+
+      return {
+        learnerKey: LearnerWorkspaceKey.fromLearner(learnerName, "Year 7"),
+        workspace,
+        learningLoop,
+        loopBatch,
+        seed,
+        quickCheckVariant,
+        reviewVariant,
+        canonicalLoopStructure
+      };
+    };
+
+    const freshRepository = new SqliteLearningLoopRepository(":memory:");
+    const staleRepository = new SqliteLearningLoopRepository(":memory:");
+    const freshFixture = buildFixture(
+      "Fresh learner",
+      "Fresh stale prompt",
+      "Fresh stale review",
+      "Fresh stale answer"
+    );
+    const staleFixture = buildFixture(
+      "Stale learner",
+      "Very stale prompt",
+      "Very stale review",
+      "Very stale answer"
+    );
+
+    for (const [repository, fixture] of [
+      [freshRepository, freshFixture] as const,
+      [staleRepository, staleFixture] as const
+    ]) {
+      repository.saveRecord(
+        fixture.learnerKey,
+        createLearningLoopRecord({
+          workspace: fixture.workspace,
+          tasks: [],
+          workPlans: [],
+          artifacts: [],
+          events: [],
+          learningLoops: [fixture.learningLoop],
+          assessments: [],
+          attempts: [],
+          evaluations: [],
+          knowledgeGaps: [],
+          masteryProfiles: [],
+          practiceActivities: [],
+          activeReviewSessions: [],
+          learnerEvidence: [],
+          masteryStates: [],
+          loopBatches: [fixture.loopBatch],
+          loopUnits: fixture.canonicalLoopStructure.loopUnits,
+          loopUnitQuestionAssignments: fixture.canonicalLoopStructure.loopUnitQuestionAssignments,
+          questionSeeds: [fixture.seed],
+          questionVariants: [fixture.quickCheckVariant, fixture.reviewVariant],
+          runtimeConversationBindings: [],
+          runtimeTraces: []
+        })
+      );
+    }
+
+    const fresh = new LearningLoopController(freshRepository).get(freshFixture.learningLoop.id);
+    const stale = new LearningLoopController(staleRepository).get(staleFixture.learningLoop.id);
+
+    expect(fresh.ok).toBe(true);
+    expect(stale.ok).toBe(true);
+    if (!fresh.ok || !stale.ok) {
+      return;
+    }
+
+    expect(stale.value.loopBatch).toMatchObject({
+      overview: fresh.value.loopBatch?.overview,
+      targetDurationMinutes: fresh.value.loopBatch?.targetDurationMinutes,
+      units: fresh.value.loopBatch?.units.map((unit) => ({
+        focus: unit.focus,
+        reason: unit.reason,
+        objectiveRefs: unit.objectiveRefs,
+        sourceRefs: unit.sourceRefs,
+        shortExplanation: unit.shortExplanation,
+        learnerTask: unit.learnerTask,
+        targetKnowledgeGapIds: unit.targetKnowledgeGapIds,
+        state: unit.state,
+        quickCheckQuestions: unit.quickCheckQuestions.map((question) => ({
+          prompt: question.prompt,
+          questionType: question.questionType,
+          options: question.options,
+          correctOptionIds: question.correctOptionIds,
+          hint: question.hint,
+          sourceFact: question.sourceFact
+        })),
+        reviewItems: unit.reviewItems.map((item) => ({
+          prompt: item.prompt,
+          answer: item.answer
+        }))
+      }))
+    });
+    expect(stale.value.loopBatch?.units[0].quickCheckQuestions[0].prompt).toBe(
+      "Which statement best describes coastal erosion?"
+    );
+    expect(stale.value.loopBatch?.units[0].reviewItems[0]).toMatchObject({
       prompt: "Recall the precise effect erosion has on the coastline.",
       answer: "Erosion wears away rock."
     });
@@ -347,6 +571,540 @@ describe("Learning loop flow", () => {
         topic: "Coasts",
         status: "secure",
         score: 0.91
+      })
+    ]);
+  });
+
+  it("reflects canonical loop and mastery state when compatibility loopBatch, practice activity, and mastery profile are stale", () => {
+    const repository = new SqliteLearningLoopRepository(":memory:");
+    const workspace = Workspace.create({
+      title: "Canonical projection workspace",
+      learner: {
+        name: "Year 7 learner",
+        yearGroup: "Year 7",
+        availableMinutesByDay: {}
+      },
+      activeObjective: "Resume the canonical loop state."
+    });
+    const events = createDomainEventRecorder(workspace.id);
+    const learningLoop = LearningLoop.rehydrate({
+      ...LearningLoop.create(
+        {
+          workspaceId: workspace.id,
+          objective: "Build secure understanding in Coasts.",
+          topic: "Coasts"
+        },
+        events
+      ).toSnapshot(),
+      phase: "loop-batching",
+      status: "active",
+      knowledgeGapIds: ["gap_coasts" as never]
+    });
+    const staleLoopBatch = LearningLoopBatch.create({
+      learningLoopId: learningLoop.id,
+      overview: "Stale compatibility batch.",
+      targetDurationMinutes: 10,
+      units: [
+        {
+          focus: "Erosion",
+          reason: "Stale batch says start here.",
+          objectiveRefs: ["objective_1"],
+          sourceRefs: ["coasts_ref_1"],
+          shortExplanation: "Stale explanation.",
+          learnerTask: "Stale learner task.",
+          targetKnowledgeGapIds: ["gap_coasts"],
+          quickCheckQuestions: [{ prompt: "Stale prompt 1" }],
+          reviewItems: [{ prompt: "Stale review 1", answer: "Stale answer 1" }],
+          state: "ready"
+        },
+        {
+          focus: "Longshore drift",
+          reason: "Canonical state says this is current.",
+          objectiveRefs: ["objective_2"],
+          sourceRefs: ["coasts_ref_2"],
+          shortExplanation: "Canonical explanation.",
+          learnerTask: "Explain longshore drift.",
+          targetKnowledgeGapIds: ["gap_coasts"],
+          quickCheckQuestions: [{ prompt: "Stale prompt 2" }],
+          reviewItems: [{ prompt: "Stale review 2", answer: "Stale answer 2" }],
+          state: "locked"
+        }
+      ]
+    });
+    const batchUnits = staleLoopBatch.toSnapshot().units;
+    const canonicalLoopUnits = [
+      LoopUnit.rehydrate({
+        id: batchUnits[0]!.id,
+        learningLoopId: learningLoop.id,
+        focus: batchUnits[0]!.focus,
+        reason: batchUnits[0]!.reason,
+        objectiveRefs: batchUnits[0]!.objectiveRefs,
+        sourceRefs: batchUnits[0]!.sourceRefs,
+        shortExplanation: batchUnits[0]!.shortExplanation,
+        learnerTask: batchUnits[0]!.learnerTask,
+        targetKnowledgeGapIds: batchUnits[0]!.targetKnowledgeGapIds,
+        state: "completed",
+        sequence: 0,
+        createdAt: staleLoopBatch.toSnapshot().createdAt
+      }),
+      LoopUnit.rehydrate({
+        id: batchUnits[1]!.id,
+        learningLoopId: learningLoop.id,
+        focus: batchUnits[1]!.focus,
+        reason: batchUnits[1]!.reason,
+        objectiveRefs: batchUnits[1]!.objectiveRefs,
+        sourceRefs: batchUnits[1]!.sourceRefs,
+        shortExplanation: batchUnits[1]!.shortExplanation,
+        learnerTask: batchUnits[1]!.learnerTask,
+        targetKnowledgeGapIds: batchUnits[1]!.targetKnowledgeGapIds,
+        state: "in_progress",
+        sequence: 1,
+        createdAt: staleLoopBatch.toSnapshot().createdAt
+      })
+    ];
+    const seed = QuestionSeed.create({
+      learningLoopId: learningLoop.id,
+      topic: "Coasts",
+      focus: "Longshore drift",
+      objectiveRefs: ["objective_2"],
+      sourceRefs: ["coasts_ref_2"],
+      answerModel: "Longshore drift moves sediment along the coast.",
+      explanation: "Waves approach at an angle and move sediment alongshore.",
+      tags: ["Longshore drift"]
+    });
+    const quickCheckVariant = QuestionVariant.create({
+      seedId: seed.id,
+      learningLoopId: learningLoop.id,
+      ownerId: batchUnits[1]!.id,
+      ownerKind: "loop_quick_check",
+      position: 0,
+      mode: "multiple_choice",
+      prompt: "What does longshore drift do?",
+      options: [
+        { id: "a", text: "Moves sediment along the coast." },
+        { id: "b", text: "Melts cliffs into the sea." }
+      ],
+      correctOptionIds: ["a"],
+      hint: "Think about sediment moving sideways.",
+      sourceFact: "Waves move sediment along the shoreline."
+    });
+    const reviewVariant = QuestionVariant.create({
+      seedId: seed.id,
+      learningLoopId: learningLoop.id,
+      ownerId: batchUnits[1]!.id,
+      ownerKind: "loop_review_item",
+      position: 0,
+      mode: "review",
+      prompt: "Explain longshore drift in one sentence.",
+      expectedAnswer: "Longshore drift moves sediment along the coast."
+    });
+    const canonicalLoopStructure = deriveCanonicalLoopStructure({
+      learningLoopId: learningLoop.id,
+      loopBatch: staleLoopBatch.toSnapshot(),
+      questionVariants: [quickCheckVariant, reviewVariant]
+    });
+    const canonicalMasteryState = MasteryState.create({
+      learningLoopId: learningLoop.id,
+      topic: "Coasts",
+      status: "secure",
+      score: 0.91,
+      lastReviewedAt: "2026-05-30T12:00:00.000Z",
+      nextReviewAt: "2026-06-06T12:00:00.000Z"
+    });
+    const staleMasteryProfile = MasteryProfile.create(learningLoop.id).recordTopicScore(
+      "Coasts",
+      0.12
+    );
+    const loopWithStaleMasteryProfile = LearningLoop.rehydrate({
+      ...learningLoop.toSnapshot(),
+      masteryProfileId: staleMasteryProfile.id
+    });
+    const stalePracticeActivity = PracticeActivity.create({
+      workspaceId: workspace.id,
+      learningLoopId: learningLoop.id,
+      title: "Stale practice activity",
+      targetKnowledgeGapIds: ["gap_coasts" as never],
+      learningObjectives: ["Stale practice objective"],
+      sourceMasterDataItemIds: ["item_stale" as never],
+      flashcardSet: {
+        instructions: "Old practice instructions.",
+        cards: [
+          {
+            id: "card_1",
+            front: "Old stale practice front",
+            back: "Old stale practice back",
+            topic: "Coasts",
+            knowledgeGapId: "gap_coasts" as never,
+            learningObjective: "Stale practice objective",
+            sourceMasterDataItemId: "item_stale" as never,
+            sourceVisibleSentence: "Old stale visible sentence."
+          }
+        ]
+      }
+    });
+
+    repository.saveRecord(
+      LearnerWorkspaceKey.fromLearner("Year 7 learner", "Year 7"),
+      createLearningLoopRecord({
+        workspace,
+        tasks: [],
+        workPlans: [],
+        artifacts: [],
+        events: [],
+        learningLoops: [loopWithStaleMasteryProfile],
+        assessments: [],
+        attempts: [],
+        evaluations: [],
+        knowledgeGaps: [],
+        learnerEvidence: [],
+        masteryStates: [canonicalMasteryState],
+        masteryProfiles: [staleMasteryProfile],
+        practiceActivities: [stalePracticeActivity],
+        activeReviewSessions: [],
+        loopBatches: [staleLoopBatch],
+        loopUnits: canonicalLoopUnits,
+        loopUnitQuestionAssignments: canonicalLoopStructure.loopUnitQuestionAssignments,
+        questionSeeds: [seed],
+        questionVariants: [quickCheckVariant, reviewVariant],
+        runtimeConversationBindings: [],
+        runtimeTraces: []
+      })
+    );
+
+    const result = new LearningLoopController(repository).get(learningLoop.id);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      return;
+    }
+
+    expect(result.value.nextAction.kind).toBe("start-loop-unit");
+    expect(result.value.nextAction.summary).toContain("Longshore drift");
+    expect(result.value.loopBatch?.units[1]?.quickCheckQuestions[0]).toMatchObject({
+      prompt: "What does longshore drift do?",
+      questionType: "multiple_choice",
+      hint: "Think about sediment moving sideways."
+    });
+    expect(result.value.loopBatch?.units[1]?.reviewItems[0]).toMatchObject({
+      prompt: "Explain longshore drift in one sentence.",
+      answer: "Longshore drift moves sediment along the coast."
+    });
+    expect(result.value.masteryProfile?.topics).toEqual([
+      expect.objectContaining({
+        topic: "Coasts",
+        score: 0.91,
+        status: "secure"
+      })
+    ]);
+    expect(result.value.currentPracticeActivity?.title).toBe("Stale practice activity");
+    expect(result.value.currentPracticeActivity?.flashcardSet.cards[0]).toMatchObject({
+      front: "Explain longshore drift in one sentence.",
+      back: "Longshore drift moves sediment along the coast."
+    });
+    expect(result.value.currentPracticeActivity?.flashcardSet.cards[0]?.front).not.toBe(
+      "Old stale practice front"
+    );
+  });
+
+  it("uses canonical loop-unit state for next action even when the batch snapshot is stale", () => {
+    const repository = new SqliteLearningLoopRepository(":memory:");
+    const workspace = Workspace.create({
+      title: "Canonical next-action workspace",
+      learner: {
+        name: "Year 7 learner",
+        yearGroup: "Year 7",
+        availableMinutesByDay: {}
+      },
+      activeObjective: "Resume the correct loop unit."
+    });
+    const events = createDomainEventRecorder(workspace.id);
+    const learningLoop = LearningLoop.rehydrate({
+      ...LearningLoop.create(
+        {
+          workspaceId: workspace.id,
+          objective: "Build secure understanding in Coasts.",
+          topic: "Coasts"
+        },
+        events
+      ).toSnapshot(),
+      phase: "loop-batching",
+      status: "active",
+      knowledgeGapIds: ["gap_coasts" as never]
+    });
+    const loopBatch = LearningLoopBatch.create({
+      learningLoopId: learningLoop.id,
+      overview: "Batch snapshot is stale.",
+      targetDurationMinutes: 10,
+      units: [
+        {
+          focus: "Erosion",
+          reason: "Start here in the stale snapshot.",
+          objectiveRefs: ["objective_1"],
+          sourceRefs: ["coasts_ref_1"],
+          shortExplanation: "Stale explanation.",
+          learnerTask: "Stale task.",
+          targetKnowledgeGapIds: ["gap_coasts"],
+          quickCheckQuestions: [{ prompt: "Stale prompt 1" }],
+          reviewItems: [{ prompt: "Stale review 1", answer: "Stale answer 1" }],
+          state: "ready"
+        },
+        {
+          focus: "Longshore drift",
+          reason: "Canonical state says this is current.",
+          objectiveRefs: ["objective_2"],
+          sourceRefs: ["coasts_ref_2"],
+          shortExplanation: "Canonical explanation.",
+          learnerTask: "Explain longshore drift.",
+          targetKnowledgeGapIds: ["gap_coasts"],
+          quickCheckQuestions: [{ prompt: "Canonical prompt 2" }],
+          reviewItems: [{ prompt: "Canonical review 2", answer: "Canonical answer 2" }],
+          state: "locked"
+        }
+      ]
+    });
+    const unitSnapshots = loopBatch.toSnapshot().units;
+    const canonicalLoopUnits = [
+      LoopUnit.rehydrate({
+        id: unitSnapshots[0]!.id,
+        learningLoopId: learningLoop.id,
+        focus: unitSnapshots[0]!.focus,
+        reason: unitSnapshots[0]!.reason,
+        objectiveRefs: unitSnapshots[0]!.objectiveRefs,
+        sourceRefs: unitSnapshots[0]!.sourceRefs,
+        shortExplanation: unitSnapshots[0]!.shortExplanation,
+        learnerTask: unitSnapshots[0]!.learnerTask,
+        targetKnowledgeGapIds: unitSnapshots[0]!.targetKnowledgeGapIds,
+        state: "completed",
+        sequence: 0,
+        createdAt: loopBatch.toSnapshot().createdAt
+      }),
+      LoopUnit.rehydrate({
+        id: unitSnapshots[1]!.id,
+        learningLoopId: learningLoop.id,
+        focus: unitSnapshots[1]!.focus,
+        reason: unitSnapshots[1]!.reason,
+        objectiveRefs: unitSnapshots[1]!.objectiveRefs,
+        sourceRefs: unitSnapshots[1]!.sourceRefs,
+        shortExplanation: unitSnapshots[1]!.shortExplanation,
+        learnerTask: unitSnapshots[1]!.learnerTask,
+        targetKnowledgeGapIds: unitSnapshots[1]!.targetKnowledgeGapIds,
+        state: "in_progress",
+        sequence: 1,
+        createdAt: loopBatch.toSnapshot().createdAt
+      })
+    ];
+
+    repository.saveRecord(
+      LearnerWorkspaceKey.fromLearner("Year 7 learner", "Year 7"),
+      createLearningLoopRecord({
+        workspace,
+        tasks: [],
+        workPlans: [],
+        artifacts: [],
+        events: [],
+        learningLoops: [learningLoop],
+        assessments: [],
+        attempts: [],
+        evaluations: [],
+        knowledgeGaps: [],
+        learnerEvidence: [],
+        masteryStates: [],
+        masteryProfiles: [],
+        practiceActivities: [],
+        activeReviewSessions: [],
+        loopBatches: [loopBatch],
+        loopUnits: canonicalLoopUnits,
+        loopUnitQuestionAssignments: [],
+        questionSeeds: [],
+        questionVariants: [],
+        runtimeConversationBindings: [],
+        runtimeTraces: []
+      })
+    );
+
+    const result = new LearningLoopController(repository).get(learningLoop.id);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      return;
+    }
+
+    expect(result.value.nextAction.kind).toBe("start-loop-unit");
+    expect(result.value.nextAction.relatedId).toBe(unitSnapshots[1]!.id);
+    expect(result.value.nextAction.summary).toContain("Longshore drift");
+  });
+
+  it("preserves canonical loop units, assignments, evidence, and mastery across repository rewrites", () => {
+    const repository = new SqliteLearningLoopRepository(":memory:");
+    const workspace = Workspace.create({
+      title: "Canonical loop persistence workspace",
+      learner: {
+        name: "Year 7 learner",
+        yearGroup: "Year 7",
+        availableMinutesByDay: {}
+      },
+      activeObjective: "Keep canonical loop structure stable."
+    });
+    const events = createDomainEventRecorder(workspace.id);
+    const learningLoop = LearningLoop.rehydrate({
+      ...LearningLoop.create(
+        {
+          workspaceId: workspace.id,
+          objective: "Build secure understanding in Coasts.",
+          topic: "Coasts"
+        },
+        events
+      ).toSnapshot(),
+      phase: "loop-batching",
+      status: "active",
+      knowledgeGapIds: ["gap_coasts" as never]
+    });
+    const loopBatch = LearningLoopBatch.create({
+      learningLoopId: learningLoop.id,
+      overview: "Canonical loop batch.",
+      targetDurationMinutes: 8,
+      units: [
+        {
+          focus: "Longshore drift",
+          reason: "Reinforce a key coastal process.",
+          objectiveRefs: ["objective_longshore_drift"],
+          sourceRefs: ["coasts_ref_2"],
+          shortExplanation: "Longshore drift moves sediment along the coastline.",
+          learnerTask: "Explain how longshore drift moves sediment.",
+          targetKnowledgeGapIds: ["gap_coasts"],
+          quickCheckQuestions: [{ prompt: "Legacy quick-check prompt" }],
+          reviewItems: [
+            {
+              prompt: "Legacy review prompt",
+              answer: "It moves sediment along the coast."
+            }
+          ]
+        }
+      ]
+    });
+    const unit = loopBatch.toSnapshot().units[0];
+    const seed = QuestionSeed.create({
+      learningLoopId: learningLoop.id,
+      topic: "Coasts",
+      focus: "Longshore drift",
+      objectiveRefs: ["objective_longshore_drift"],
+      sourceRefs: ["coasts_ref_2"],
+      answerModel: "It moves sediment along the coast.",
+      explanation: "Longshore drift moves sediment along the coastline.",
+      tags: ["Longshore drift"]
+    });
+    const quickCheckVariant = QuestionVariant.create({
+      seedId: seed.id,
+      learningLoopId: learningLoop.id,
+      ownerId: unit.id,
+      ownerKind: "loop_quick_check",
+      position: 0,
+      mode: "multiple_select",
+      prompt: "Which statements describe longshore drift?",
+      options: [
+        { id: "a", text: "It moves sediment along the coast." },
+        { id: "b", text: "It freezes waves in place." },
+        { id: "c", text: "It depends on waves approaching at an angle." }
+      ],
+      correctOptionIds: ["a", "c"],
+      hint: "Think about angled waves and sediment movement.",
+      sourceFact: "Waves approaching at an angle can move sediment along the coast."
+    });
+    const reviewVariant = QuestionVariant.create({
+      seedId: seed.id,
+      learningLoopId: learningLoop.id,
+      ownerId: unit.id,
+      ownerKind: "loop_review_item",
+      position: 0,
+      mode: "review",
+      prompt: "Recall the effect of longshore drift.",
+      expectedAnswer: "It moves sediment along the coast."
+    });
+    const canonicalLoopStructure = deriveCanonicalLoopStructure({
+      learningLoopId: learningLoop.id,
+      loopBatch: loopBatch.toSnapshot(),
+      questionVariants: [quickCheckVariant, reviewVariant]
+    });
+    const learnerEvidence = LearnerEvidence.create({
+      workspaceId: workspace.id,
+      learningLoopId: learningLoop.id,
+      loopUnitId: unit.id,
+      seedId: seed.id,
+      variantId: reviewVariant.id,
+      responseText: "It moves sediment along the coast.",
+      correctness: "correct",
+      supportUsed: "independent"
+    });
+    const masteryState = MasteryState.create({
+      learningLoopId: learningLoop.id,
+      topic: "Coasts",
+      status: "developing",
+      score: 0.62,
+      lastReviewedAt: "2026-05-31T09:00:00.000Z",
+      nextReviewAt: "2026-06-02T09:00:00.000Z"
+    });
+    const key = LearnerWorkspaceKey.fromLearner("Year 7 learner", "Year 7");
+
+    const record = createLearningLoopRecord({
+      workspace,
+      tasks: [],
+      workPlans: [],
+      artifacts: [],
+      events: [],
+      learningLoops: [learningLoop],
+      assessments: [],
+      attempts: [],
+      evaluations: [],
+      knowledgeGaps: [],
+      learnerEvidence: [learnerEvidence],
+      masteryStates: [masteryState],
+      masteryProfiles: [],
+      practiceActivities: [],
+      activeReviewSessions: [],
+      loopBatches: [loopBatch],
+      loopUnits: canonicalLoopStructure.loopUnits,
+      loopUnitQuestionAssignments: canonicalLoopStructure.loopUnitQuestionAssignments,
+      questionSeeds: [seed],
+      questionVariants: [quickCheckVariant, reviewVariant],
+      runtimeConversationBindings: [],
+      runtimeTraces: []
+    });
+
+    repository.saveRecord(key, record);
+    const loaded = repository.findRecord(key);
+    expect(loaded?.loopUnits).toHaveLength(1);
+    expect(loaded?.loopUnitQuestionAssignments).toHaveLength(2);
+    expect(loaded?.learnerEvidence).toHaveLength(1);
+    expect(loaded?.masteryStates).toHaveLength(1);
+
+    repository.saveRecord(key, createLearningLoopRecord(loaded!));
+    const reloaded = repository.findRecord(key);
+
+    expect(reloaded?.loopUnits).toHaveLength(1);
+    expect(reloaded?.loopUnitQuestionAssignments).toHaveLength(2);
+    expect(reloaded?.learnerEvidence).toHaveLength(1);
+    expect(reloaded?.masteryStates).toHaveLength(1);
+
+    const result = new LearningLoopController(repository).get(learningLoop.id);
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      return;
+    }
+
+    expect(result.value.loopBatch?.units[0].quickCheckQuestions[0]).toMatchObject({
+      prompt: "Which statements describe longshore drift?",
+      questionType: "multiple_select",
+      hint: "Think about angled waves and sediment movement."
+    });
+    expect(result.value.loopBatch?.units[0].reviewItems[0]).toMatchObject({
+      prompt: "Recall the effect of longshore drift.",
+      answer: "It moves sediment along the coast."
+    });
+    expect(result.value.masteryProfile?.topics).toEqual([
+      expect.objectContaining({
+        topic: "Coasts",
+        status: "developing",
+        score: 0.62
       })
     ]);
   });
@@ -575,7 +1333,7 @@ describe("Learning loop flow", () => {
     }
 
     expect(studyPlan.value.learningLoop.id).toBe(assessment.value.learningLoop.id);
-    expect(studyPlan.value.knowledgeGaps).toHaveLength(0);
+    expect(studyPlan.value.knowledgeGaps).toHaveLength(1);
     expect(studyPlan.value.masteryProfile?.topics).toEqual([
       expect.objectContaining({
         topic: "fractions",
@@ -593,7 +1351,7 @@ describe("Learning loop flow", () => {
       learningLoopId: assessment.value.learningLoop.id,
       workPlanId: studyPlan.value.workPlan.id,
       artifactId: studyPlan.value.artifact.id,
-      diagnosedGapCount: 0
+      diagnosedGapCount: 1
     });
   });
 

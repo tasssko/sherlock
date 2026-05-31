@@ -5,6 +5,8 @@ import { ActiveReviewSession } from "../../domain/learning/ActiveReviewSession.j
 import { Assessment, Attempt, Evaluation } from "../../domain/learning/Assessment.js";
 import { LearnerEvidence } from "../../domain/learning/LearnerEvidence.js";
 import { LearningLoopBatch } from "../../domain/learning/LearningLoopBatch.js";
+import { LoopUnit } from "../../domain/learning/LoopUnit.js";
+import { LoopUnitQuestionAssignment } from "../../domain/learning/LoopUnitQuestionAssignment.js";
 import { MasteryState } from "../../domain/learning/MasteryState.js";
 import {
   KnowledgeGap,
@@ -32,6 +34,14 @@ import type {
 } from "../../domain/study/MasterDataUpload.js";
 import { LearnerWorkspaceKey } from "./LearnerWorkspaceKey.js";
 import {
+  CanonicalSnapshotFallbackRequiredError,
+  DrizzleCanonicalLearningStore
+} from "./DrizzleCanonicalLearningStore.js";
+import {
+  canonicalLearningColumnDefinitions,
+  canonicalLearningTableBootstrapSql
+} from "./drizzleCanonicalSchema.js";
+import {
   createLearningLoopRecord,
   type LearningLoopRecord,
   type LearningLoopRepository,
@@ -52,10 +62,12 @@ function ensureDirectory(pathname: string): void {
 
 export class SqliteLearningLoopRepository implements LearningLoopRepository {
   private readonly database: DatabaseSync;
+  private readonly canonicalStore: DrizzleCanonicalLearningStore;
 
   constructor(pathname = process.env.SHERLOCK_DB_PATH ?? "./data/sherlock.sqlite") {
     ensureDirectory(pathname);
     this.database = new DatabaseSync(pathname);
+    this.canonicalStore = new DrizzleCanonicalLearningStore(this.database);
     this.migrate();
   }
 
@@ -89,12 +101,8 @@ export class SqliteLearningLoopRepository implements LearningLoopRepository {
       .prepare("select snapshot from events where learner_key = ? order by rowid asc")
       .all(key.value)
       .map((row) => parseSnapshot<DomainEvent>((row as { snapshot: string }).snapshot));
-    const learningLoops = this.database
-      .prepare("select snapshot from learning_loops where learner_key = ? order by rowid asc")
-      .all(key.value)
-      .map((row) =>
-        LearningLoop.rehydrate(parseSnapshot((row as { snapshot: string }).snapshot))
-      );
+    const canonicalState = this.loadCanonicalStateForLearner(key.value);
+    const learningLoops = canonicalState.learningLoops;
     const assessments = this.database
       .prepare("select snapshot from assessments where learner_key = ? order by rowid asc")
       .all(key.value)
@@ -133,36 +141,18 @@ export class SqliteLearningLoopRepository implements LearningLoopRepository {
       .map((row) =>
         ActiveReviewSession.rehydrate(parseSnapshot((row as { snapshot: string }).snapshot))
       );
-    const learnerEvidence = this.database
-      .prepare("select snapshot from learner_evidence where learner_key = ? order by rowid asc")
-      .all(key.value)
-      .map((row) =>
-        LearnerEvidence.rehydrate(parseSnapshot((row as { snapshot: string }).snapshot))
-      );
-    const masteryStates = this.database
-      .prepare("select snapshot from mastery_states where learner_key = ? order by rowid asc")
-      .all(key.value)
-      .map((row) =>
-        MasteryState.rehydrate(parseSnapshot((row as { snapshot: string }).snapshot))
-      );
+    const learnerEvidence = canonicalState.learnerEvidence;
+    const masteryStates = canonicalState.masteryStates;
     const loopBatches = this.database
       .prepare("select snapshot from loop_batches where learner_key = ? order by rowid asc")
       .all(key.value)
       .map((row) =>
         LearningLoopBatch.rehydrate(parseSnapshot((row as { snapshot: string }).snapshot))
       );
-    const questionSeeds = this.database
-      .prepare("select snapshot from question_seeds where learner_key = ? order by rowid asc")
-      .all(key.value)
-      .map((row) =>
-        QuestionSeed.rehydrate(parseSnapshot((row as { snapshot: string }).snapshot))
-      );
-    const questionVariants = this.database
-      .prepare("select snapshot from question_variants where learner_key = ? order by rowid asc")
-      .all(key.value)
-      .map((row) =>
-        QuestionVariant.rehydrate(parseSnapshot((row as { snapshot: string }).snapshot))
-      );
+    const loopUnits = canonicalState.loopUnits;
+    const loopUnitQuestionAssignments = canonicalState.loopUnitQuestionAssignments;
+    const questionSeeds = canonicalState.questionSeeds;
+    const questionVariants = canonicalState.questionVariants;
     const runtimeTraces = this.database
       .prepare("select snapshot from runtime_traces where learner_key = ? order by rowid asc")
       .all(key.value)
@@ -195,6 +185,8 @@ export class SqliteLearningLoopRepository implements LearningLoopRepository {
       learnerEvidence,
       masteryStates,
       loopBatches,
+      loopUnits,
+      loopUnitQuestionAssignments,
       questionSeeds,
       questionVariants,
       runtimeConversationBindings,
@@ -218,15 +210,12 @@ export class SqliteLearningLoopRepository implements LearningLoopRepository {
   }
 
   findRecordByLearningLoopId(learningLoopId: LearningLoopId): LocatedLearningLoopRecord | undefined {
-    const row = this.database
-      .prepare("select learner_key from learning_loops where id = ?")
-      .get(learningLoopId) as { learner_key: string } | undefined;
-
-    if (!row) {
+    const learnerKey = this.canonicalStore.findLearningLoopLearnerKey(String(learningLoopId));
+    if (!learnerKey) {
       return undefined;
     }
 
-    const key = LearnerWorkspaceKey.fromValue(row.learner_key);
+    const key = LearnerWorkspaceKey.fromValue(learnerKey);
     const record = this.findRecord(key);
 
     return record ? { key, record } : undefined;
@@ -396,12 +385,21 @@ export class SqliteLearningLoopRepository implements LearningLoopRepository {
   saveRecord(key: LearnerWorkspaceKey, record: LearningLoopRecord): void {
     this.database.exec("begin");
     try {
+      this.canonicalStore.replaceCanonicalState(key.value, {
+        learningLoops: record.learningLoops,
+        learnerEvidence: record.learnerEvidence ?? [],
+        masteryStates: record.masteryStates ?? [],
+        loopUnits: record.loopUnits ?? [],
+        loopUnitQuestionAssignments: record.loopUnitQuestionAssignments ?? [],
+        questionSeeds: record.questionSeeds ?? [],
+        questionVariants: record.questionVariants ?? []
+      });
+
       this.database.prepare("delete from workspaces where learner_key = ?").run(key.value);
       this.database.prepare("delete from tasks where learner_key = ?").run(key.value);
       this.database.prepare("delete from work_plans where learner_key = ?").run(key.value);
       this.database.prepare("delete from artifacts where learner_key = ?").run(key.value);
       this.database.prepare("delete from events where learner_key = ?").run(key.value);
-      this.database.prepare("delete from learning_loops where learner_key = ?").run(key.value);
       this.database.prepare("delete from assessments where learner_key = ?").run(key.value);
       this.database.prepare("delete from attempts where learner_key = ?").run(key.value);
       this.database.prepare("delete from evaluations where learner_key = ?").run(key.value);
@@ -409,11 +407,7 @@ export class SqliteLearningLoopRepository implements LearningLoopRepository {
       this.database.prepare("delete from mastery_profiles where learner_key = ?").run(key.value);
       this.database.prepare("delete from practice_activities where learner_key = ?").run(key.value);
       this.database.prepare("delete from active_review_sessions where learner_key = ?").run(key.value);
-      this.database.prepare("delete from learner_evidence where learner_key = ?").run(key.value);
-      this.database.prepare("delete from mastery_states where learner_key = ?").run(key.value);
       this.database.prepare("delete from loop_batches where learner_key = ?").run(key.value);
-      this.database.prepare("delete from question_seeds where learner_key = ?").run(key.value);
-      this.database.prepare("delete from question_variants where learner_key = ?").run(key.value);
       this.database
         .prepare("delete from runtime_conversation_bindings where learner_key = ?")
         .run(key.value);
@@ -449,13 +443,6 @@ export class SqliteLearningLoopRepository implements LearningLoopRepository {
       );
       for (const event of record.events) {
         insertEvent.run(event.id, key.value, JSON.stringify(event));
-      }
-
-      const insertLoop = this.database.prepare(
-        "insert into learning_loops (id, learner_key, snapshot) values (?, ?, ?)"
-      );
-      for (const loop of record.learningLoops) {
-        insertLoop.run(loop.id, key.value, JSON.stringify(loop.toSnapshot()));
       }
 
       const insertAssessment = this.database.prepare(
@@ -525,34 +512,6 @@ export class SqliteLearningLoopRepository implements LearningLoopRepository {
         );
       }
 
-      const insertLearnerEvidence = this.database.prepare(
-        `insert into learner_evidence (id, learner_key, learning_loop_id, snapshot)
-         values (?, ?, ?, ?)`
-      );
-      for (const evidence of record.learnerEvidence ?? []) {
-        const snapshot = evidence.toSnapshot();
-        insertLearnerEvidence.run(
-          snapshot.id,
-          key.value,
-          snapshot.learningLoopId,
-          JSON.stringify(snapshot)
-        );
-      }
-
-      const insertMasteryState = this.database.prepare(
-        `insert into mastery_states (id, learner_key, learning_loop_id, snapshot)
-         values (?, ?, ?, ?)`
-      );
-      for (const masteryState of record.masteryStates ?? []) {
-        const snapshot = masteryState.toSnapshot();
-        insertMasteryState.run(
-          snapshot.id,
-          key.value,
-          snapshot.learningLoopId ?? null,
-          JSON.stringify(snapshot)
-        );
-      }
-
       const insertLoopBatch = this.database.prepare(
         `insert into loop_batches (id, learner_key, learning_loop_id, snapshot)
          values (?, ?, ?, ?)`
@@ -563,30 +522,6 @@ export class SqliteLearningLoopRepository implements LearningLoopRepository {
           snapshot.id,
           key.value,
           snapshot.learningLoopId,
-          JSON.stringify(snapshot)
-        );
-      }
-
-      const insertQuestionSeed = this.database.prepare(
-        `insert into question_seeds (id, learner_key, learning_loop_id, snapshot)
-         values (?, ?, ?, ?)`
-      );
-      for (const questionSeed of record.questionSeeds ?? []) {
-        const snapshot = questionSeed.toSnapshot();
-        insertQuestionSeed.run(snapshot.id, key.value, snapshot.learningLoopId, JSON.stringify(snapshot));
-      }
-
-      const insertQuestionVariant = this.database.prepare(
-        `insert into question_variants (id, learner_key, learning_loop_id, seed_id, snapshot)
-         values (?, ?, ?, ?, ?)`
-      );
-      for (const questionVariant of record.questionVariants ?? []) {
-        const snapshot = questionVariant.toSnapshot();
-        insertQuestionVariant.run(
-          snapshot.id,
-          key.value,
-          snapshot.learningLoopId,
-          snapshot.seedId,
           JSON.stringify(snapshot)
         );
       }
@@ -622,6 +557,7 @@ export class SqliteLearningLoopRepository implements LearningLoopRepository {
 
   private migrate(): void {
     this.database.exec(`
+      ${canonicalLearningTableBootstrapSql}
       create table if not exists workspaces (
         id text primary key,
         learner_key text not null,
@@ -643,11 +579,6 @@ export class SqliteLearningLoopRepository implements LearningLoopRepository {
         snapshot text not null
       );
       create table if not exists events (
-        id text primary key,
-        learner_key text not null,
-        snapshot text not null
-      );
-      create table if not exists learning_loops (
         id text primary key,
         learner_key text not null,
         snapshot text not null
@@ -690,35 +621,10 @@ export class SqliteLearningLoopRepository implements LearningLoopRepository {
         learning_loop_id text not null,
         snapshot text not null
       );
-      create table if not exists learner_evidence (
-        id text primary key,
-        learner_key text not null,
-        learning_loop_id text not null,
-        snapshot text not null
-      );
-      create table if not exists mastery_states (
-        id text primary key,
-        learner_key text not null,
-        learning_loop_id text,
-        snapshot text not null
-      );
       create table if not exists loop_batches (
         id text primary key,
         learner_key text not null,
         learning_loop_id text not null,
-        snapshot text not null
-      );
-      create table if not exists question_seeds (
-        id text primary key,
-        learner_key text not null,
-        learning_loop_id text not null,
-        snapshot text not null
-      );
-      create table if not exists question_variants (
-        id text primary key,
-        learner_key text not null,
-        learning_loop_id text not null,
-        seed_id text not null,
         snapshot text not null
       );
       create table if not exists runtime_conversation_bindings (
@@ -745,5 +651,76 @@ export class SqliteLearningLoopRepository implements LearningLoopRepository {
         item_snapshot text not null
       );
     `);
+
+    for (const [tableName, definitions] of Object.entries(canonicalLearningColumnDefinitions)) {
+      this.ensureColumns(tableName, definitions);
+    }
+  }
+
+  private ensureColumns(tableName: string, definitions: Record<string, string>): void {
+    const rows = this.database
+      .prepare(`pragma table_info(${tableName})`)
+      .all() as { name: string }[];
+    const existing = new Set(rows.map((row) => row.name));
+
+    for (const [columnName, definition] of Object.entries(definitions)) {
+      if (existing.has(columnName)) {
+        continue;
+      }
+
+      this.database.exec(
+        `alter table ${tableName} add column ${columnName} ${definition}`
+      );
+    }
+  }
+
+  private loadCanonicalStateForLearner(key: string): {
+    learningLoops: readonly LearningLoop[];
+    learnerEvidence: readonly LearnerEvidence[];
+    masteryStates: readonly MasteryState[];
+    loopUnits: readonly LoopUnit[];
+    loopUnitQuestionAssignments: readonly LoopUnitQuestionAssignment[];
+    questionSeeds: readonly QuestionSeed[];
+    questionVariants: readonly QuestionVariant[];
+  } {
+    try {
+      return this.canonicalStore.loadCanonicalStateForLearner(key);
+    } catch (error) {
+      if (!(error instanceof CanonicalSnapshotFallbackRequiredError)) {
+        throw error;
+      }
+
+      // Canonical rows remain authoritative. This fallback is only for explicit
+      // compatibility rehydration when typed relational columns drift away from
+      // the canonical snapshot payload we already persisted.
+      console.warn(
+        `[loop.study] Canonical read fallback used for learner ${key}: ${error.message}`
+      );
+
+      const snapshots = this.canonicalStore.loadSnapshotsForLearner(key);
+      return {
+        learningLoops: snapshots.learningLoops.map((snapshot) =>
+          LearningLoop.rehydrate(parseSnapshot(snapshot))
+        ),
+        learnerEvidence: snapshots.learnerEvidence.map((snapshot) =>
+          LearnerEvidence.rehydrate(parseSnapshot(snapshot))
+        ),
+        masteryStates: snapshots.masteryStates.map((snapshot) =>
+          MasteryState.rehydrate(parseSnapshot(snapshot))
+        ),
+        loopUnits: snapshots.loopUnits.map((snapshot) =>
+          LoopUnit.rehydrate(parseSnapshot(snapshot))
+        ),
+        loopUnitQuestionAssignments: snapshots.loopUnitQuestionAssignments.map((snapshot) =>
+          LoopUnitQuestionAssignment.rehydrate(parseSnapshot(snapshot))
+        ),
+        questionSeeds: snapshots.questionSeeds.map((snapshot) =>
+          QuestionSeed.rehydrate(parseSnapshot(snapshot))
+        ),
+        questionVariants: snapshots.questionVariants.map((snapshot) =>
+          QuestionVariant.rehydrate(parseSnapshot(snapshot))
+        )
+      };
+    }
   }
 }

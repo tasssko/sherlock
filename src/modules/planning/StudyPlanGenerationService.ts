@@ -61,16 +61,21 @@ export class StudyPlanGenerationService {
     const masteryProfile = input.existingRecord
       ? projectMasteryProfileForLoop(input.existingRecord, learningLoop)
       : undefined;
-    const activeReviewSessions =
-      input.existingRecord?.activeReviewSessions.filter(
-        (candidate) => candidate.toSnapshot().learningLoopId === learningLoop.id
+    const learnerEvidence =
+      input.existingRecord?.learnerEvidence?.filter(
+        (candidate) => candidate.learningLoopId === learningLoop.id
+      ) ?? [];
+    const masteryStates =
+      input.existingRecord?.masteryStates?.filter(
+        (candidate) => candidate.learningLoopId === learningLoop.id
       ) ?? [];
     const adaptedPlan = this.adaptation.adapt({
-      activeReviewSessions,
       command: input.command,
+      learnerEvidence,
       learningLoop,
       knowledgeGaps: loopKnowledgeGaps,
-      masteryProfile
+      masteryProfile,
+      masteryStates
     });
     const context = StudyPlanningContext.fromCommand(input.command, {
       diagnosedGaps: adaptedPlan.diagnosedGaps,
@@ -158,6 +163,7 @@ export class StudyPlanGenerationService {
       learningLoop,
       knowledgeGaps: loopKnowledgeGaps,
       masteryProfile,
+      masteryStates,
       events,
       runtimeTrace: generated.value.runtimeTrace
     });

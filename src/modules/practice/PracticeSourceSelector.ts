@@ -1,3 +1,4 @@
+import { firstActionableLoopUnit } from "../../domain/learning/LoopUnit.js";
 import type { KnowledgeGap, LearningLoop } from "../../domain/learning/LearningLoop.js";
 import type { MasterDataItem, MasterDataSource } from "../../domain/learning/MasterData.js";
 import type { QuestionSeed, QuestionVariant } from "../../domain/learning/QuestionBank.js";
@@ -37,9 +38,13 @@ export class PracticeSourceSelector {
     learningLoop: LearningLoop,
     cardCount: number
   ): Result<PracticeSourceSelection> {
-    const activeLoopUnit = record.loopBatches
-      .find((candidate) => candidate.learningLoopId === learningLoop.id)
-      ?.firstActionableUnit();
+    const activeLoopUnit =
+      firstActionableLoopUnit(
+        (record.loopUnits ?? []).filter((candidate) => candidate.learningLoopId === learningLoop.id)
+      )?.toSnapshot() ??
+      record.loopBatches
+        .find((candidate) => candidate.learningLoopId === learningLoop.id)
+        ?.firstActionableUnit();
 
     if (!learningLoop.isDiagnosed()) {
       if (activeLoopUnit && learningLoop.knowledgeGapIds.length > 0) {
@@ -145,6 +150,7 @@ export class PracticeSourceSelector {
     learningLoop: LearningLoop,
     knowledgeGaps: readonly KnowledgeGap[],
     activeLoopUnit: {
+      id?: string;
       focus: string;
       sourceRefs: readonly string[];
       targetKnowledgeGapIds: readonly string[];
@@ -184,6 +190,7 @@ export class PracticeSourceSelector {
       activeLoopUnit,
       fallbackCandidates,
       learningLoop,
+      loopUnitAssignments: record.loopUnitQuestionAssignments ?? [],
       questionSeeds: record.questionSeeds ?? [],
       questionVariants: record.questionVariants ?? [],
       unitGaps
@@ -223,6 +230,109 @@ export class PracticeSourceSelector {
 }
 
 function buildVariantSelections(input: {
+  activeLoopUnit: {
+    id?: string;
+    focus: string;
+    sourceRefs: readonly string[];
+    targetKnowledgeGapIds: readonly string[];
+  };
+  fallbackCandidates: readonly {
+    item: MasterDataItem;
+    source: MasterDataSource;
+  }[];
+  learningLoop: LearningLoop;
+  loopUnitAssignments: NonNullable<LearningLoopRecord["loopUnitQuestionAssignments"]>;
+  questionSeeds: readonly QuestionSeed[];
+  questionVariants: readonly QuestionVariant[];
+  unitGaps: readonly KnowledgeGap[];
+}): readonly PracticeActivitySelection[] {
+  const unitId = input.activeLoopUnit.id;
+  if (!unitId) {
+    return [];
+  }
+
+  const reviewVariants = input.questionVariants
+    .filter((candidate) => candidate.learningLoopId === input.learningLoop.id)
+    .filter((candidate) => {
+      const assignment = input.loopUnitAssignments.find(
+        (entry) =>
+          entry.learningLoopId === input.learningLoop.id &&
+          entry.loopUnitId === (unitId as never) &&
+          entry.variantId === candidate.id &&
+          entry.purpose === "review"
+      );
+      return Boolean(assignment);
+    })
+    .sort((left, right) => {
+      const leftAssignment = input.loopUnitAssignments.find(
+        (entry) =>
+          entry.learningLoopId === input.learningLoop.id &&
+          entry.loopUnitId === (unitId as never) &&
+          entry.variantId === left.id &&
+          entry.purpose === "review"
+      );
+      const rightAssignment = input.loopUnitAssignments.find(
+        (entry) =>
+          entry.learningLoopId === input.learningLoop.id &&
+          entry.loopUnitId === (unitId as never) &&
+          entry.variantId === right.id &&
+          entry.purpose === "review"
+      );
+      if (leftAssignment && rightAssignment) {
+        return leftAssignment.sequence - rightAssignment.sequence;
+      }
+
+      return left.position - right.position;
+    });
+
+  if (reviewVariants.length === 0) {
+    return buildLegacyVariantSelections(input);
+  }
+
+  const seedById = new Map(input.questionSeeds.map((seed) => [seed.id, seed]));
+  const selections: PracticeActivitySelection[] = [];
+
+  for (let index = 0; index < reviewVariants.length; index += 1) {
+    const reviewVariant = reviewVariants[index];
+    if (!reviewVariant) {
+      continue;
+    }
+    const variantSnapshot = reviewVariant.toSnapshot();
+    const questionSeed = seedById.get(variantSnapshot.seedId);
+    if (!questionSeed) {
+      continue;
+    }
+
+    const matchedCandidate =
+      input.fallbackCandidates.find(({ item }) =>
+        questionSeed.toSnapshot().sourceRefs.includes(item.sourceRef ?? item.id)
+      ) ?? input.fallbackCandidates[index % input.fallbackCandidates.length];
+    const gap =
+      input.unitGaps.find((candidate) =>
+        questionSeed
+          .toSnapshot()
+          .objectiveRefs.some((objectiveRef) =>
+            sharesAnyToken(candidate.toSnapshot().description, objectiveRef)
+          )
+      ) ?? input.unitGaps[index % input.unitGaps.length];
+
+    if (!matchedCandidate || !gap) {
+      continue;
+    }
+
+    selections.push({
+      gap,
+      item: matchedCandidate.item,
+      questionSeed,
+      reviewVariant,
+      source: matchedCandidate.source
+    });
+  }
+
+  return selections;
+}
+
+function buildLegacyVariantSelections(input: {
   activeLoopUnit: {
     id?: string;
     focus: string;

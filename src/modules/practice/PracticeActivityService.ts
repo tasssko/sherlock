@@ -1,6 +1,11 @@
 import { ActiveReviewSession } from "../../domain/learning/ActiveReviewSession.js";
 import { LearnerEvidence } from "../../domain/learning/LearnerEvidence.js";
 import {
+  completeCurrentLoopUnit,
+  firstActionableLoopUnit,
+  markFirstReadyLoopUnitInProgress
+} from "../../domain/learning/LoopUnit.js";
+import {
   KnowledgeGap,
   LearningLoop,
   MasteryProfile
@@ -125,6 +130,9 @@ export class PracticeActivityService {
     const updatedLoopBatch = record.loopBatches
       .find((candidate) => candidate.learningLoopId === learningLoop.id)
       ?.markFirstReadyInProgress();
+    const updatedLoopUnits = markFirstReadyLoopUnitInProgress(
+      (record.loopUnits ?? []).filter((candidate) => candidate.learningLoopId === learningLoop.id)
+    );
 
     const aggregateRecord = {
       ...aggregate.value.record,
@@ -136,6 +144,16 @@ export class PracticeActivityService {
             updatedLoopBatch
           ]
         : [...aggregate.value.record.loopBatches]
+      ,
+      loopUnits: updatedLoopUnits.length > 0
+        ? [
+            ...(aggregate.value.record.loopUnits?.filter(
+              (candidate) => candidate.learningLoopId !== learningLoop.id
+            ) ?? []),
+            ...updatedLoopUnits
+          ]
+        : [...(aggregate.value.record.loopUnits ?? [])],
+      loopUnitQuestionAssignments: [...(aggregate.value.record.loopUnitQuestionAssignments ?? [])]
     } satisfies LearningLoopRecord;
 
     return ok({
@@ -195,14 +213,14 @@ export class PracticeActivityService {
       reviewSessionId: activeReviewSession.value.id
     });
 
-    const refreshedKnowledgeGaps = this.refreshKnowledgeGapsFromPractice({
-      activeReviewSession: activeReviewSession.value,
-      learningLoop,
-      record
-    });
-    const currentLoopUnitId = record.loopBatches
-      .find((candidate) => candidate.learningLoopId === learningLoop.id)
-      ?.firstActionableUnit()?.id;
+    const currentLoopUnit =
+      firstActionableLoopUnit(
+        (record.loopUnits ?? []).filter((candidate) => candidate.learningLoopId === learningLoop.id)
+      )?.toSnapshot() ??
+      record.loopBatches
+        .find((candidate) => candidate.learningLoopId === learningLoop.id)
+        ?.firstActionableUnit();
+    const currentLoopUnitId = currentLoopUnit?.id;
     const learnerEvidence = this.buildLearnerEvidenceFromPractice({
       activeReviewSession: activeReviewSession.value,
       currentLoopUnitId,
@@ -210,13 +228,26 @@ export class PracticeActivityService {
       practiceActivity,
       record
     });
+    const refreshedKnowledgeGaps = this.refreshKnowledgeGapsFromPractice({
+      currentLoopUnit,
+      learnerEvidence,
+      learningLoop,
+      record
+    });
     const completedLoopBatch = record.loopBatches
       .find((candidate) => candidate.learningLoopId === learningLoop.id)
       ?.completeCurrentUnit();
+    const completedLoopUnits = completeCurrentLoopUnit(
+      (record.loopUnits ?? []).filter((candidate) => candidate.learningLoopId === learningLoop.id)
+    );
     const nextUnitGapIds = completedLoopBatch?.firstActionableUnit()?.targetKnowledgeGapIds ?? [];
+    const canonicalNextUnitGapIds =
+      firstActionableLoopUnit(completedLoopUnits)?.toSnapshot().targetKnowledgeGapIds ?? [];
     const nextLearningLoopGapIds =
-      nextUnitGapIds.length > 0
-        ? nextUnitGapIds
+      canonicalNextUnitGapIds.length > 0
+        ? canonicalNextUnitGapIds
+        : nextUnitGapIds.length > 0
+          ? nextUnitGapIds
         : refreshedKnowledgeGaps.remainingKnowledgeGapIds;
 
     const events = createDomainEventRecorder(record.workspace.id);
@@ -280,6 +311,17 @@ export class PracticeActivityService {
             completedLoopBatch
           ]
         : [...record.loopBatches],
+      loopUnits: completedLoopUnits.length > 0
+        ? [
+            ...(record.loopUnits?.filter(
+              (candidate) => candidate.learningLoopId !== learningLoop.id
+            ) ?? []),
+            ...completedLoopUnits
+          ]
+        : [...(record.loopUnits ?? [])],
+      loopUnitQuestionAssignments: [...(record.loopUnitQuestionAssignments ?? [])],
+      questionSeeds: [...(record.questionSeeds ?? [])],
+      questionVariants: [...(record.questionVariants ?? [])],
       runtimeConversationBindings: [...record.runtimeConversationBindings],
       runtimeTraces: [...record.runtimeTraces]
     } satisfies LearningLoopRecord;
@@ -298,33 +340,63 @@ export class PracticeActivityService {
   }
 
   private refreshKnowledgeGapsFromPractice(input: {
-    activeReviewSession: ActiveReviewSession;
+    currentLoopUnit?: {
+      focus: string;
+      targetKnowledgeGapIds: readonly KnowledgeGapId[];
+    };
+    learnerEvidence: readonly LearnerEvidence[];
     learningLoop: LearningLoopRecord["learningLoops"][number];
     record: LearningLoopRecord;
   }): { knowledgeGaps: readonly KnowledgeGap[]; remainingKnowledgeGapIds: readonly KnowledgeGapId[] } {
+    const targetedGapIds =
+      input.currentLoopUnit?.targetKnowledgeGapIds.length
+        ? input.currentLoopUnit.targetKnowledgeGapIds
+        : input.learningLoop.knowledgeGapIds;
     const retainedUntargetedGaps = input.record.knowledgeGaps.filter(
-      (gap) =>
-        !input.learningLoop.knowledgeGapIds.includes(gap.id)
+      (gap) => !targetedGapIds.includes(gap.id)
     );
 
-    const existingKnowledgeGapsById = new Map(
-      input.record.knowledgeGaps.map((gap) => [gap.id, gap])
+    const seedById = new Map(
+      (input.record.questionSeeds ?? [])
+        .filter((candidate) => candidate.learningLoopId === input.learningLoop.id)
+        .map((candidate) => [candidate.id, candidate])
+    );
+    const candidateTargetGaps = input.record.knowledgeGaps.filter((gap) =>
+      targetedGapIds.includes(gap.id)
     );
     const refreshedTargetedGaps = [
       ...new Map(
-        input.activeReviewSession.itemResults
-          .filter((result) => !result.correct || result.confidence !== "high")
-          .map((result) => {
-            const existingGap = existingKnowledgeGapsById.get(result.knowledgeGapId);
+        input.learnerEvidence
+          .map((evidence) => evidence.toSnapshot())
+          .filter(
+            (evidence) =>
+              evidence.correctness !== "correct" || evidence.confidence !== "high"
+          )
+          .map((evidence) => {
+            const relatedSeed = seedById.get(evidence.seedId);
+            const existingGap =
+              resolveKnowledgeGapForEvidence({
+                candidateTargetGaps,
+                evidence,
+                relatedSeed
+              }) ?? candidateTargetGaps[0];
             return [
-              result.knowledgeGapId,
+              existingGap?.id ?? evidence.seedId,
               existingGap ??
                 KnowledgeGap.create({
                   learningLoopId: input.learningLoop.id,
-                  topic: result.topic,
-                  description: `Needs more active review after flashcard practice.`,
-                  evidence: `Practice response to ${result.practiceItemId} was ${result.correct ? "correct but not yet confident" : result.overconfidence ? "incorrect with high confidence" : "incorrect"}.`,
-                  severity: result.correct ? "medium" : "high"
+                  topic: input.learningLoop.topic,
+                  description: relatedSeed
+                    ? `Needs more active review in ${relatedSeed.toSnapshot().focus}.`
+                    : `Needs more active review after flashcard practice.`,
+                  evidence: `Practice evidence on ${relatedSeed?.toSnapshot().focus ?? "the current focus"} was ${
+                    evidence.correctness === "correct"
+                      ? "correct but not yet confident"
+                      : evidence.confidence === "high"
+                        ? "incorrect with high confidence"
+                        : "incorrect"
+                  }.`,
+                  severity: evidence.correctness === "correct" ? "medium" : "high"
                 })
             ] as const;
           })
@@ -435,4 +507,47 @@ function resolveQuestionVariant(input: {
 
 function normalizeAnswerText(value: string | undefined): string {
   return (value ?? "").trim().toLowerCase();
+}
+
+function resolveKnowledgeGapForEvidence(input: {
+  candidateTargetGaps: readonly KnowledgeGap[];
+  evidence: ReturnType<LearnerEvidence["toSnapshot"]>;
+  relatedSeed: { toSnapshot(): { focus: string; objectiveRefs: readonly string[] } } | undefined;
+}): KnowledgeGap | undefined {
+  if (!input.relatedSeed) {
+    return input.candidateTargetGaps[0];
+  }
+
+  const seedSnapshot = input.relatedSeed.toSnapshot();
+  return (
+    input.candidateTargetGaps.find((candidate) =>
+      seedSnapshot.objectiveRefs.some((objectiveRef) =>
+        sharesAnyToken(candidate.toSnapshot().description, objectiveRef)
+      )
+    ) ??
+    input.candidateTargetGaps.find((candidate) =>
+      sharesAnyToken(candidate.toSnapshot().description, seedSnapshot.focus)
+    ) ??
+    input.candidateTargetGaps[0]
+  );
+}
+
+function sharesAnyToken(left: string, right: string): boolean {
+  const leftTokens = new Set(tokenize(left));
+  for (const token of tokenize(right)) {
+    if (leftTokens.has(token)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function tokenize(value: string): readonly string[] {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .split(" ")
+    .map((token) => token.trim())
+    .filter(Boolean);
 }

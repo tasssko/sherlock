@@ -6,9 +6,13 @@ import { AssessmentAttemptController } from "../src/modules/assessment/Assessmen
 import { MasterDataUploadController } from "../src/modules/assessment/MasterDataUploadController.js";
 import { studyDays } from "../src/domain/study/StudySchedule.js";
 import { ok } from "../src/domain/primitives/result.js";
-import { LearningLoop } from "../src/domain/learning/LearningLoop.js";
+import { LearningLoop, MasteryProfile } from "../src/domain/learning/LearningLoop.js";
+import { LearnerEvidence } from "../src/domain/learning/LearnerEvidence.js";
+import { MasteryState } from "../src/domain/learning/MasteryState.js";
 import { createDomainEventRecorder } from "../src/domain/primitives/Event.js";
+import { Workspace } from "../src/domain/primitives/Workspace.js";
 import { createUploadItemsFromInterpretation } from "../src/modules/masterData/MasterDataInterpretation.js";
+import { createLearningLoopRecord } from "../src/modules/planning/LearningLoopRepository.js";
 import { LearnerWorkspaceKey } from "../src/modules/planning/LearnerWorkspaceKey.js";
 
 describe("StudyPlanController", () => {
@@ -432,5 +436,381 @@ describe("StudyPlanController", () => {
     expect(capturedInput?.materialInterpretations?.[0]?.learnerFacingMaterialSummary).toBe(
       "Latest Coasts summary for the current learning loop."
     );
+  });
+
+  it("adapts study-plan context from canonical learner evidence and mastery state without review-session snapshots", async () => {
+    const repository = new SqliteLearningLoopRepository(":memory:");
+    const interpretation = {
+      schema: "MasterDataInterpretationCandidate.v1" as const,
+      detectedSubject: "Mathematics",
+      detectedYearGroup: "Year 7",
+      mainTopic: "fractions",
+      subtopics: ["Equivalent fractions"],
+      keyPeople: [],
+      keyTerms: ["equivalent fraction"],
+      importantDates: [],
+      processes: ["simplifying fractions"],
+      learnerFacingMaterialSummary: "Fractions can look different while keeping the same value.",
+      learningObjectives: [
+        {
+          id: "objective_fractions",
+          objective: "Explain why equivalent fractions represent the same value.",
+          sourceRefs: ["fractions_source"]
+        }
+      ],
+      sourceMap: [
+        {
+          sourceRef: "fractions_source",
+          excerpt: "Equivalent fractions represent the same amount."
+        }
+      ],
+      items: [
+        {
+          subject: "Mathematics",
+          yearGroup: "Year 7",
+          topic: "fractions",
+          subtopic: "Equivalent fractions",
+          itemType: "fact" as const,
+          content: "Equivalent fractions represent the same amount.",
+          sourceRef: "fractions_source"
+        }
+      ]
+    };
+
+    const upload = repository.registerMasterData({
+      sourceName: "Fractions Canonical",
+      rawSourceContent: "Equivalent fractions represent the same amount.",
+      contentType: "text/plain",
+      acceptedInterpretation: interpretation,
+      learnerYearGroup: "Year 7",
+      userHints: {
+        subject: "Mathematics",
+        topic: "fractions"
+      },
+      items: createUploadItemsFromInterpretation(interpretation)
+    });
+
+    const workspace = Workspace.create({
+      title: "Fractions workspace",
+      learner: {
+        name: "Year 7 learner",
+        yearGroup: "Year 7",
+        availableMinutesByDay: {}
+      },
+      activeObjective: "Build secure understanding in fractions."
+    });
+    const events = createDomainEventRecorder(workspace.id);
+    const learningLoop = LearningLoop.rehydrate({
+      ...LearningLoop.create(
+        {
+          workspaceId: workspace.id,
+          objective: "Build secure understanding in fractions.",
+          topic: "fractions",
+          sourceIds: [upload.source.id]
+        },
+        events
+      ).toSnapshot(),
+      phase: "mastery-tracking",
+      status: "active",
+      evaluationIds: ["evaluation_fractions" as never],
+      knowledgeGapIds: []
+    });
+    const learnerEvidence = LearnerEvidence.create({
+      workspaceId: workspace.id,
+      learningLoopId: learningLoop.id,
+      seedId: "question_seed_fractions" as never,
+      variantId: "question_variant_fractions" as never,
+      sourceId: upload.source.id as never,
+      responseText: "I am not sure.",
+      confidence: "low",
+      correctness: "incorrect",
+      supportUsed: "independent"
+    });
+    const masteryState = MasteryState.create({
+      learningLoopId: learningLoop.id,
+      topic: "fractions",
+      status: "developing",
+      score: 0.42,
+      lastReviewedAt: "2026-05-31T10:00:00.000Z",
+      nextReviewAt: "2026-06-02T10:00:00.000Z"
+    });
+
+    repository.saveRecord(
+      LearnerWorkspaceKey.fromLearner("Year 7 learner", "Year 7"),
+      createLearningLoopRecord({
+        workspace,
+        tasks: [],
+        workPlans: [],
+        artifacts: [],
+        events: [...events.all()],
+        learningLoops: [learningLoop],
+        assessments: [],
+        attempts: [],
+        evaluations: [],
+        knowledgeGaps: [],
+        learnerEvidence: [learnerEvidence],
+        masteryStates: [masteryState],
+        masteryProfiles: [],
+        practiceActivities: [],
+        activeReviewSessions: [],
+        loopBatches: [],
+        loopUnits: [],
+        loopUnitQuestionAssignments: [],
+        questionSeeds: [],
+        questionVariants: [],
+        runtimeConversationBindings: [],
+        runtimeTraces: []
+      })
+    );
+
+    let capturedInput:
+      | Parameters<NonNullable<ConstructorParameters<typeof StudyPlanController>[3]>["generateStudyPlan"]>[0]
+      | undefined;
+    const controller = new StudyPlanController(
+      repository,
+      undefined,
+      undefined,
+      {
+        evaluateActiveReviewSession: () => {
+          throw new Error("not used");
+        },
+        evaluateAssessmentAttempt: () => {
+          throw new Error("not used");
+        },
+        generateInitialAssessment: () => {
+          throw new Error("not used");
+        },
+        generatePracticeActivity: () => {
+          throw new Error("not used");
+        },
+        interpretMasterData: () => {
+          throw new Error("not used");
+        },
+        generateStudyPlan: async (input) => {
+          capturedInput = input;
+          return ok({
+            assumptions: [],
+            childTaskSummaries: ["Review equivalent fractions with retrieval and explanation."],
+            decisions: [],
+            artifactContent: {
+              summary: "A short fractions plan with retrieval and explanation.",
+              sessions: [
+                {
+                  day: "Monday",
+                  minutes: 30,
+                  topic: "fractions",
+                  activity: "Review equivalent fractions and explain why they are equal.",
+                  outcome: "Explain one example clearly."
+                }
+              ],
+              checkpoints: ["Explain one equivalent-fractions example without notes."],
+              notes: ["Use the learner's recent uncertainty to guide the explanation."]
+            }
+          });
+        }
+      }
+    );
+
+    const result = await controller.execute({
+      learnerName: "Year 7 learner",
+      yearGroup: "Year 7",
+      objective: "Build secure understanding in fractions.",
+      focusTopics: ["fractions"],
+      availableMinutesByDay: Object.fromEntries(
+        studyDays.map((day) => [day, day === "Saturday" ? 60 : 30])
+      ) as Record<(typeof studyDays)[number], number>
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      return;
+    }
+
+    expect(capturedInput?.context.objective).toContain(
+      "Prioritise recent practice evidence in fractions."
+    );
+    expect(capturedInput?.context.focusTopics).toContain("fractions");
+  });
+
+  it("projects mastery from canonical mastery states even when a stored mastery profile is stale", async () => {
+    const repository = new SqliteLearningLoopRepository(":memory:");
+    const interpretation = {
+      schema: "MasterDataInterpretationCandidate.v1" as const,
+      detectedSubject: "Mathematics",
+      detectedYearGroup: "Year 7",
+      mainTopic: "fractions",
+      subtopics: ["Equivalent fractions"],
+      keyPeople: [],
+      keyTerms: ["equivalent fraction"],
+      importantDates: [],
+      processes: ["simplifying fractions"],
+      learnerFacingMaterialSummary: "Fractions can look different while keeping the same value.",
+      learningObjectives: [
+        {
+          id: "objective_fractions",
+          objective: "Explain why equivalent fractions represent the same value.",
+          sourceRefs: ["fractions_source"]
+        }
+      ],
+      sourceMap: [
+        {
+          sourceRef: "fractions_source",
+          excerpt: "Equivalent fractions represent the same amount."
+        }
+      ],
+      items: [
+        {
+          subject: "Mathematics",
+          yearGroup: "Year 7",
+          topic: "fractions",
+          subtopic: "Equivalent fractions",
+          itemType: "fact" as const,
+          content: "Equivalent fractions represent the same amount.",
+          sourceRef: "fractions_source"
+        }
+      ]
+    };
+
+    const upload = repository.registerMasterData({
+      sourceName: "Fractions Canonical",
+      rawSourceContent: "Equivalent fractions represent the same amount.",
+      contentType: "text/plain",
+      acceptedInterpretation: interpretation,
+      learnerYearGroup: "Year 7",
+      userHints: {
+        subject: "Mathematics",
+        topic: "fractions"
+      },
+      items: createUploadItemsFromInterpretation(interpretation)
+    });
+
+    const workspace = Workspace.create({
+      title: "Fractions workspace",
+      learner: {
+        name: "Year 7 learner",
+        yearGroup: "Year 7",
+        availableMinutesByDay: {}
+      },
+      activeObjective: "Build secure understanding in fractions."
+    });
+    const events = createDomainEventRecorder(workspace.id);
+    const baseLoop = LearningLoop.create(
+      {
+        workspaceId: workspace.id,
+        objective: "Build secure understanding in fractions.",
+        topic: "fractions",
+        sourceIds: [upload.source.id]
+      },
+      events
+    );
+    const staleProfile = MasteryProfile.create(baseLoop.id).recordTopicScore("fractions", 0.12);
+    const learningLoop = LearningLoop.rehydrate({
+      ...baseLoop.toSnapshot(),
+      phase: "mastery-tracking",
+      status: "active",
+      masteryProfileId: staleProfile.id
+    });
+    const masteryState = MasteryState.create({
+      learningLoopId: learningLoop.id,
+      topic: "fractions",
+      status: "secure",
+      score: 0.91,
+      lastReviewedAt: "2026-05-31T10:00:00.000Z",
+      nextReviewAt: "2026-06-06T10:00:00.000Z"
+    });
+
+    repository.saveRecord(
+      LearnerWorkspaceKey.fromLearner("Year 7 learner", "Year 7"),
+      createLearningLoopRecord({
+        workspace,
+        tasks: [],
+        workPlans: [],
+        artifacts: [],
+        events: [...events.all()],
+        learningLoops: [learningLoop],
+        assessments: [],
+        attempts: [],
+        evaluations: [],
+        knowledgeGaps: [],
+        learnerEvidence: [],
+        masteryStates: [masteryState],
+        masteryProfiles: [staleProfile],
+        practiceActivities: [],
+        activeReviewSessions: [],
+        loopBatches: [],
+        loopUnits: [],
+        loopUnitQuestionAssignments: [],
+        questionSeeds: [],
+        questionVariants: [],
+        runtimeConversationBindings: [],
+        runtimeTraces: []
+      })
+    );
+
+    const controller = new StudyPlanController(
+      repository,
+      undefined,
+      undefined,
+      {
+        evaluateActiveReviewSession: () => {
+          throw new Error("not used");
+        },
+        evaluateAssessmentAttempt: () => {
+          throw new Error("not used");
+        },
+        generateInitialAssessment: () => {
+          throw new Error("not used");
+        },
+        generatePracticeActivity: () => {
+          throw new Error("not used");
+        },
+        interpretMasterData: () => {
+          throw new Error("not used");
+        },
+        generateStudyPlan: async () =>
+          ok({
+            assumptions: [],
+            childTaskSummaries: ["Review equivalent fractions with retrieval and explanation."],
+            decisions: [],
+            artifactContent: {
+              summary: "A short fractions plan.",
+              sessions: [
+                {
+                  day: "Monday",
+                  minutes: 30,
+                  topic: "fractions",
+                  activity: "Explain one equivalent-fractions example.",
+                  outcome: "Recall one example clearly."
+                }
+              ],
+              checkpoints: ["Recall one equivalent-fractions example without notes."],
+              notes: []
+            }
+          })
+      }
+    );
+
+    const result = await controller.execute({
+      learnerName: "Year 7 learner",
+      yearGroup: "Year 7",
+      objective: "Build secure understanding in fractions.",
+      focusTopics: ["fractions"],
+      availableMinutesByDay: Object.fromEntries(
+        studyDays.map((day) => [day, day === "Saturday" ? 60 : 30])
+      ) as Record<(typeof studyDays)[number], number>
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      return;
+    }
+
+    expect(result.value.masteryProfile?.topics).toEqual([
+      expect.objectContaining({
+        topic: "fractions",
+        score: 0.91,
+        status: "secure"
+      })
+    ]);
   });
 });

@@ -14,6 +14,7 @@ export type LearnerEvidenceId = Brand<string, "LearnerEvidenceId">;
 export type LearningLoopBatchId = Brand<string, "LearningLoopBatchId">;
 export type LearningLoopId = Brand<string, "LearningLoopId">;
 export type LearningLoopUnitId = Brand<string, "LearningLoopUnitId">;
+export type LoopUnitQuestionAssignmentId = Brand<string, "LoopUnitQuestionAssignmentId">;
 export type MasterDataItemId = Brand<string, "MasterDataItemId">;
 export type MasterDataSourceId = Brand<string, "MasterDataSourceId">;
 export type MasteryStateId = Brand<string, "MasteryStateId">;
@@ -80,6 +81,10 @@ export function createLearningLoopId(): LearningLoopId {
 
 export function createLearningLoopUnitId(): LearningLoopUnitId {
   return createId("loop_unit") as LearningLoopUnitId;
+}
+
+export function createLoopUnitQuestionAssignmentId(): LoopUnitQuestionAssignmentId {
+  return createId("loop_assignment") as LoopUnitQuestionAssignmentId;
 }
 
 export function createMasterDataItemId(): MasterDataItemId {

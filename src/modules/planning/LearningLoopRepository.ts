@@ -1,6 +1,8 @@
 import type { ActiveReviewSession } from "../../domain/learning/ActiveReviewSession.js";
 import type { Assessment, Attempt, Evaluation } from "../../domain/learning/Assessment.js";
 import type { LearnerEvidence } from "../../domain/learning/LearnerEvidence.js";
+import type { LoopUnit } from "../../domain/learning/LoopUnit.js";
+import type { LoopUnitQuestionAssignment } from "../../domain/learning/LoopUnitQuestionAssignment.js";
 import type { MasteryState } from "../../domain/learning/MasteryState.js";
 import type { LearningLoopBatch } from "../../domain/learning/LearningLoopBatch.js";
 import type {
@@ -42,6 +44,8 @@ export interface LearningLoopRecord {
   learnerEvidence?: readonly LearnerEvidence[];
   masteryStates?: readonly MasteryState[];
   loopBatches: readonly LearningLoopBatch[];
+  loopUnits?: readonly LoopUnit[];
+  loopUnitQuestionAssignments?: readonly LoopUnitQuestionAssignment[];
   questionSeeds?: readonly QuestionSeed[];
   questionVariants?: readonly QuestionVariant[];
   runtimeConversationBindings: readonly RuntimeConversationBinding[];
@@ -66,6 +70,8 @@ export function createLearningLoopRecord(record: LearningLoopRecord): LearningLo
     learnerEvidence: [...(record.learnerEvidence ?? [])],
     masteryStates: [...(record.masteryStates ?? [])],
     loopBatches: [...record.loopBatches],
+    loopUnits: [...(record.loopUnits ?? [])],
+    loopUnitQuestionAssignments: [...(record.loopUnitQuestionAssignments ?? [])],
     questionSeeds: [...(record.questionSeeds ?? [])],
     questionVariants: [...(record.questionVariants ?? [])],
     runtimeConversationBindings: [...record.runtimeConversationBindings],

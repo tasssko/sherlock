@@ -71,7 +71,26 @@ export class PracticeActivityController {
     }
 
     this.repository.saveRecord(located.key, completed.value.record);
-    return ok(this.projector.projectCompletion(completed.value.aggregate));
+    return ok(
+      this.projector.projectCompletion({
+        ...completed.value.aggregate,
+        masteryStates: (completed.value.record.masteryStates ?? []).filter(
+          (candidate) => candidate.learningLoopId === completed.value.aggregate.learningLoop.id
+        ),
+        loopUnits: (located.record.loopUnits ?? []).filter(
+          (candidate) => candidate.learningLoopId === completed.value.aggregate.learningLoop.id
+        ),
+        loopUnitQuestionAssignments: (located.record.loopUnitQuestionAssignments ?? []).filter(
+          (candidate) => candidate.learningLoopId === completed.value.aggregate.learningLoop.id
+        ),
+        questionSeeds: (located.record.questionSeeds ?? []).filter(
+          (candidate) => candidate.learningLoopId === completed.value.aggregate.learningLoop.id
+        ),
+        questionVariants: (located.record.questionVariants ?? []).filter(
+          (candidate) => candidate.learningLoopId === completed.value.aggregate.learningLoop.id
+        )
+      })
+    );
   }
 
   list(learningLoopId: string): Result<PracticeActivityListResponse> {
@@ -106,7 +125,19 @@ export class PracticeActivityController {
     return ok(
       this.projector.projectList({
         learningLoop,
-        practiceActivities
+        practiceActivities,
+        loopUnits: (located.record.loopUnits ?? []).filter(
+          (candidate) => candidate.learningLoopId === learningLoop.id
+        ),
+        loopUnitQuestionAssignments: (located.record.loopUnitQuestionAssignments ?? []).filter(
+          (candidate) => candidate.learningLoopId === learningLoop.id
+        ),
+        questionSeeds: (located.record.questionSeeds ?? []).filter(
+          (candidate) => candidate.learningLoopId === learningLoop.id
+        ),
+        questionVariants: (located.record.questionVariants ?? []).filter(
+          (candidate) => candidate.learningLoopId === learningLoop.id
+        )
       })
     );
   }

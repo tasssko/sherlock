@@ -78,6 +78,8 @@ export class WorkspaceAssessmentAssembler {
         practiceActivities: [...(existingRecord?.practiceActivities ?? [])],
         activeReviewSessions: [...(existingRecord?.activeReviewSessions ?? [])],
         loopBatches: [...(existingRecord?.loopBatches ?? [])],
+        loopUnits: [...(existingRecord?.loopUnits ?? [])],
+        loopUnitQuestionAssignments: [...(existingRecord?.loopUnitQuestionAssignments ?? [])],
         questionSeeds: [...(existingRecord?.questionSeeds ?? [])],
         questionVariants: [...(existingRecord?.questionVariants ?? [])],
         runtimeConversationBindings: upsertRuntimeConversationBinding(

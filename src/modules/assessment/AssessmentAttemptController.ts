@@ -18,8 +18,9 @@ import { NextActionProjector } from "../learning/NextActionProjector.js";
 import { appendSucceededRuntimeTrace } from "../runtime/RuntimeTraceLedger.js";
 import { upsertRuntimeConversationBinding } from "../runtime/RuntimeConversationBinding.js";
 import {
-  applyQuestionVariantsToLoopBatch,
-  deriveQuestionBankFromLoopBatch
+  deriveCanonicalLoopStructure,
+  deriveQuestionBankFromLoopBatch,
+  projectLoopBatchFromCanonical
 } from "../questions/QuestionBankLoopAdapter.js";
 
 export class AssessmentAttemptController
@@ -126,6 +127,12 @@ export class AssessmentAttemptController
           loopBatches: located.record.loopBatches.filter(
             (candidate) => candidate.learningLoopId !== securedLearningLoop.id
           ),
+          loopUnits: (located.record.loopUnits ?? []).filter(
+            (candidate) => candidate.learningLoopId !== securedLearningLoop.id
+          ),
+          loopUnitQuestionAssignments: (located.record.loopUnitQuestionAssignments ?? []).filter(
+            (candidate) => candidate.learningLoopId !== securedLearningLoop.id
+          ),
           questionSeeds: [...(located.record.questionSeeds ?? [])],
           questionVariants: [...(located.record.questionVariants ?? [])],
           runtimeConversationBindings: upsertRuntimeConversationBinding(
@@ -189,6 +196,11 @@ export class AssessmentAttemptController
       topic: materialInterpretation.mainTopic,
       loopBatch: loopBatch.toSnapshot()
     });
+    const canonicalLoopStructure = deriveCanonicalLoopStructure({
+      learningLoopId: evaluation.value.learningLoop.id,
+      loopBatch: loopBatch.toSnapshot(),
+      questionVariants: derivedQuestionBank.questionVariants
+    });
 
     const newEvents = events.all();
     const workspace = located.record.workspace.appendEventLedger(newEvents.map((event) => event.id));
@@ -218,6 +230,18 @@ export class AssessmentAttemptController
           (candidate) => candidate.learningLoopId !== evaluation.value.learningLoop.id
         ),
         loopBatch
+      ],
+      loopUnits: [
+        ...(located.record.loopUnits?.filter(
+          (candidate) => candidate.learningLoopId !== evaluation.value.learningLoop.id
+        ) ?? []),
+        ...canonicalLoopStructure.loopUnits
+      ],
+      loopUnitQuestionAssignments: [
+        ...(located.record.loopUnitQuestionAssignments?.filter(
+          (candidate) => candidate.learningLoopId !== evaluation.value.learningLoop.id
+        ) ?? []),
+        ...canonicalLoopStructure.loopUnitQuestionAssignments
       ],
       questionSeeds: [
         ...(located.record.questionSeeds?.filter(
@@ -253,6 +277,15 @@ export class AssessmentAttemptController
       }
     );
 
+    const projectedLoopBatch =
+      projectLoopBatchFromCanonical({
+        loopBatch: loopBatch.toSnapshot(),
+        learningLoopId: evaluation.value.learningLoop.id,
+        loopUnits: canonicalLoopStructure.loopUnits,
+        loopUnitQuestionAssignments: canonicalLoopStructure.loopUnitQuestionAssignments,
+        questionVariants: derivedQuestionBank.questionVariants
+      }) ?? loopBatch.toSnapshot();
+
     this.repository.saveRecord(located.key, updatedRecord);
 
     return ok({
@@ -260,17 +293,15 @@ export class AssessmentAttemptController
       phase: evaluation.value.learningLoop.phase,
       nextAction: this.nextActionProjector.project({
         learningLoop: evaluation.value.learningLoop,
-        loopBatch
+        loopBatch,
+        loopUnits: canonicalLoopStructure.loopUnits
       }),
       workspace: workspace.toSnapshot(),
       learningLoop: evaluation.value.learningLoop.toSnapshot(),
       attempt: evaluation.value.attempt.toSnapshot(),
       evaluation: evaluation.value.evaluation.toSnapshot(),
       knowledgeGaps: evaluation.value.knowledgeGaps.map((gap) => gap.toSnapshot()),
-      loopBatch: applyQuestionVariantsToLoopBatch(
-        loopBatch.toSnapshot(),
-        derivedQuestionBank.questionVariants
-      ),
+      loopBatch: projectedLoopBatch,
       events: newEvents
     });
   }

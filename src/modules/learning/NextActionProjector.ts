@@ -1,5 +1,7 @@
 import type { LearningLoop } from "../../domain/learning/LearningLoop.js";
 import type { LearningLoopBatch } from "../../domain/learning/LearningLoopBatch.js";
+import { firstActionableLoopUnit } from "../../domain/learning/LoopUnit.js";
+import type { LoopUnit } from "../../domain/learning/LoopUnit.js";
 import type { NextActionProjection } from "../../domain/study/NextAction.js";
 
 export class NextActionProjector {
@@ -7,6 +9,7 @@ export class NextActionProjector {
     assessmentId?: string;
     learningLoop: LearningLoop;
     loopBatch?: LearningLoopBatch;
+    loopUnits?: readonly LoopUnit[];
     practiceActivityId?: string;
     workPlanId?: string;
   }): NextActionProjection {
@@ -21,7 +24,9 @@ export class NextActionProjector {
     }
 
     if (phase === "loop-batching") {
-      const actionableUnit = input.loopBatch?.firstActionableUnit();
+      const actionableUnit =
+        firstActionableLoopUnit(input.loopUnits ?? [])?.toSnapshot() ??
+        input.loopBatch?.firstActionableUnit();
       return {
         kind: "start-loop-unit",
         summary: actionableUnit

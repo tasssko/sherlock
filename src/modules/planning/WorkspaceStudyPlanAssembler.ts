@@ -3,6 +3,7 @@ import type {
   LearningLoop,
   MasteryProfile
 } from "../../domain/learning/LearningLoop.js";
+import type { MasteryState } from "../../domain/learning/MasteryState.js";
 import { TaskGraph } from "../../domain/primitives/TaskGraph.js";
 import type { DomainEventRecorder } from "../../domain/primitives/Event.js";
 import type { Task } from "../../domain/primitives/Task.js";
@@ -24,6 +25,7 @@ export interface WorkspaceStudyPlanAssemblerInput {
   knowledgeGaps: readonly KnowledgeGap[];
   learningLoop: LearningLoop;
   masteryProfile?: MasteryProfile;
+  masteryStates?: readonly MasteryState[];
   parentTask: Task;
   runtimeConversationBinding?: RuntimeConversationBinding;
   runtimeTrace?: RuntimeTraceSeed;
@@ -68,6 +70,7 @@ export class WorkspaceStudyPlanAssembler {
       artifact: input.artifact,
       knowledgeGaps: input.knowledgeGaps,
       masteryProfile: input.masteryProfile,
+      masteryStates: input.masteryStates,
       events: allEvents,
       runtimeConversationBinding: input.runtimeConversationBinding,
       runtimeTrace: input.runtimeTrace

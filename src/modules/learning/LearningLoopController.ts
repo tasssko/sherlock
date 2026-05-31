@@ -140,6 +140,15 @@ export class LearningLoopController {
         knowledgeGaps,
         masteryProfile,
         loopBatch: projectedLoopBatch,
+        loopUnits: (located.record.loopUnits ?? []).filter(
+          (candidate) => candidate.learningLoopId === normalizedLearningLoop.id
+        ),
+        loopUnitQuestionAssignments: (located.record.loopUnitQuestionAssignments ?? []).filter(
+          (candidate) => candidate.learningLoopId === normalizedLearningLoop.id
+        ),
+        questionSeeds: located.record.questionSeeds?.filter(
+          (candidate) => candidate.learningLoopId === normalizedLearningLoop.id
+        ),
         questionVariants: located.record.questionVariants?.filter(
           (candidate) => candidate.learningLoopId === normalizedLearningLoop.id
         ),

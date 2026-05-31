@@ -19,8 +19,9 @@ import { appendSucceededRuntimeTrace } from "../runtime/RuntimeTraceLedger.js";
 import { upsertRuntimeConversationBinding } from "../runtime/RuntimeConversationBinding.js";
 import type { MasterDataInterpretationCandidate } from "../masterData/MasterDataInterpretation.js";
 import {
-  applyQuestionVariantsToLoopBatch,
-  deriveQuestionBankFromLoopBatch
+  deriveCanonicalLoopStructure,
+  deriveQuestionBankFromLoopBatch,
+  projectLoopBatchFromCanonical
 } from "../questions/QuestionBankLoopAdapter.js";
 
 export class InitialLoopBatchController
@@ -134,6 +135,11 @@ export class InitialLoopBatchController
       topic: interpretation.mainTopic,
       loopBatch: loopBatch.toSnapshot()
     });
+    const canonicalLoopStructure = deriveCanonicalLoopStructure({
+      learningLoopId: activeLoop.id,
+      loopBatch: loopBatch.toSnapshot(),
+      questionVariants: derivedQuestionBank.questionVariants
+    });
 
     const newEvents = events.all();
     const nextWorkspace = workspace.appendEventLedger(newEvents.map((event) => event.id));
@@ -168,6 +174,18 @@ export class InitialLoopBatchController
           ) ?? []),
           loopBatch
         ],
+        loopUnits: [
+          ...(effectiveRecord?.loopUnits?.filter(
+            (candidate) => candidate.learningLoopId !== learningLoop.id
+          ) ?? []),
+          ...canonicalLoopStructure.loopUnits
+        ],
+        loopUnitQuestionAssignments: [
+          ...(effectiveRecord?.loopUnitQuestionAssignments?.filter(
+            (candidate) => candidate.learningLoopId !== learningLoop.id
+          ) ?? []),
+          ...canonicalLoopStructure.loopUnitQuestionAssignments
+        ],
         questionSeeds: [
           ...(effectiveRecord?.questionSeeds?.filter(
             (candidate) => candidate.learningLoopId !== learningLoop.id
@@ -192,6 +210,15 @@ export class InitialLoopBatchController
       }
     );
 
+    const projectedLoopBatch =
+      projectLoopBatchFromCanonical({
+        loopBatch: loopBatch.toSnapshot(),
+        learningLoopId: learningLoop.id,
+        loopUnits: canonicalLoopStructure.loopUnits,
+        loopUnitQuestionAssignments: canonicalLoopStructure.loopUnitQuestionAssignments,
+        questionVariants: derivedQuestionBank.questionVariants
+      }) ?? loopBatch.toSnapshot();
+
     this.repository.saveRecord(key, updatedRecord);
 
     return ok({
@@ -199,15 +226,13 @@ export class InitialLoopBatchController
       phase: learningLoop.phase,
       nextAction: this.nextActionProjector.project({
         learningLoop,
-        loopBatch
+        loopBatch,
+        loopUnits: canonicalLoopStructure.loopUnits
       }),
       workspace: nextWorkspace.toSnapshot(),
       learningLoop: learningLoop.toSnapshot(),
       knowledgeGaps: plannedGaps.map((gap) => gap.toSnapshot()),
-      loopBatch: applyQuestionVariantsToLoopBatch(
-        loopBatch.toSnapshot(),
-        derivedQuestionBank.questionVariants
-      ),
+      loopBatch: projectedLoopBatch,
       events: newEvents
     });
   }

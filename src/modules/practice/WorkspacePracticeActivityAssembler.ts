@@ -63,6 +63,8 @@ export class WorkspacePracticeActivityAssembler {
         practiceActivities: [...input.record.practiceActivities, input.practiceActivity],
         activeReviewSessions: [...input.record.activeReviewSessions],
         loopBatches: [...input.record.loopBatches],
+        loopUnits: [...(input.record.loopUnits ?? [])],
+        loopUnitQuestionAssignments: [...(input.record.loopUnitQuestionAssignments ?? [])],
         questionSeeds: [...(input.record.questionSeeds ?? [])],
         questionVariants: [...(input.record.questionVariants ?? [])],
         runtimeConversationBindings: upsertRuntimeConversationBinding(
