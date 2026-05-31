@@ -10,7 +10,9 @@ export type AttemptId = Brand<string, "AttemptId">;
 export type EventId = Brand<string, "EventId">;
 export type EvaluationId = Brand<string, "EvaluationId">;
 export type KnowledgeGapId = Brand<string, "KnowledgeGapId">;
+export type LearningLoopBatchId = Brand<string, "LearningLoopBatchId">;
 export type LearningLoopId = Brand<string, "LearningLoopId">;
+export type LearningLoopUnitId = Brand<string, "LearningLoopUnitId">;
 export type MasterDataItemId = Brand<string, "MasterDataItemId">;
 export type MasterDataSourceId = Brand<string, "MasterDataSourceId">;
 export type MasteryProfileId = Brand<string, "MasteryProfileId">;
@@ -60,8 +62,16 @@ export function createKnowledgeGapId(): KnowledgeGapId {
   return createId("gap") as KnowledgeGapId;
 }
 
+export function createLearningLoopBatchId(): LearningLoopBatchId {
+  return createId("loop_batch") as LearningLoopBatchId;
+}
+
 export function createLearningLoopId(): LearningLoopId {
   return createId("loop") as LearningLoopId;
+}
+
+export function createLearningLoopUnitId(): LearningLoopUnitId {
+  return createId("loop_unit") as LearningLoopUnitId;
 }
 
 export function createMasterDataItemId(): MasterDataItemId {

@@ -175,7 +175,7 @@ async function main(): Promise<void> {
     assert(interpretationMessage, "Relay did not receive an interpretMasterData message.");
     assertCommandMessageShape(
       interpretationMessage,
-      "loop_study.interpret_master_data"
+      "runtime.generate_structured_candidate"
     );
     assert.match(
       String(interpretationMessage.metadata?.product ?? ""),
@@ -191,8 +191,10 @@ async function main(): Promise<void> {
     );
 
     const interpretationPayload = parseLoopStudyCommandContent(
-      interpretationMessage.content
+      interpretationMessage.content,
+      interpretationMessage.metadata
     ).packet.payload as {
+      candidateKind?: string;
       contentType?: string;
       learnerYearGroup?: string;
       rawSourceContent?: string;
@@ -200,6 +202,7 @@ async function main(): Promise<void> {
       sourceName?: string;
       userHints?: { subject?: string; topic?: string };
     };
+    assert.equal(interpretationPayload.candidateKind, "master_data_interpretation");
     assert.equal(interpretationPayload.sourceName, demo.label);
     assert.equal(interpretationPayload.contentType, contentType);
     assert.equal(interpretationPayload.learnerYearGroup, demo.yearGroup);
@@ -235,7 +238,7 @@ async function main(): Promise<void> {
     assert(assessmentMessage, "Relay did not receive an initial assessment command.");
     assertCommandMessageShape(
       assessmentMessage,
-      "loop_study.generate_initial_assessment"
+      "runtime.generate_structured_candidate"
     );
     assert.equal(assessmentMessage.to, "@tutor");
     assert.match(
@@ -248,8 +251,10 @@ async function main(): Promise<void> {
     );
 
     const assessmentPacket = parseLoopStudyCommandContent(
-      assessmentMessage.content
+      assessmentMessage.content,
+      assessmentMessage.metadata
     ).packet.payload as {
+      candidateKind?: string;
       materialInterpretation?: {
         mainTopic?: string;
         subject?: string;
@@ -264,6 +269,7 @@ async function main(): Promise<void> {
       };
       topic?: string;
     };
+    assert.equal(assessmentPacket.candidateKind, "initial_assessment");
     assert.equal(assessmentPacket.topic, demo.topic);
     assert.equal(assessmentPacket.materialInterpretation?.mainTopic, demo.topic);
     assert.equal(assessmentPacket.materialInterpretation?.subject, demo.subject);

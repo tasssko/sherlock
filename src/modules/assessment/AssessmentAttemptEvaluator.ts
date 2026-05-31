@@ -9,6 +9,8 @@ import type { AgentRuntime } from "../runtime/AgentRuntime.js";
 import { FixtureAgentRuntime } from "../runtime/FixtureAgentRuntime.js";
 import type { RuntimeTraceSeed } from "../runtime/RuntimeTrace.js";
 import type { RuntimeConversationBinding } from "../runtime/RuntimeConversationBinding.js";
+import type { MasterDataInterpretationCandidate } from "../masterData/MasterDataInterpretation.js";
+import type { MasterDataItem } from "../../domain/learning/MasterData.js";
 
 export interface AssessmentAttemptEvaluation {
   attempt: Attempt;
@@ -27,7 +29,9 @@ export class AssessmentAttemptEvaluator {
     command: SubmitAssessmentAttemptCommand;
     events: DomainEventRecorder;
     learningLoop: LearningLoop;
+    materialInterpretation?: MasterDataInterpretationCandidate;
     runtimeConversationBinding?: RuntimeConversationBinding;
+    sourceItems?: readonly MasterDataItem[];
   }): Promise<Result<AssessmentAttemptEvaluation>> {
     const assessmentSnapshot = input.assessment.toSnapshot();
     const attempt = Attempt.create(
@@ -42,12 +46,48 @@ export class AssessmentAttemptEvaluator {
         topic: assessmentSnapshot.topic
       },
       contextTopic: assessmentSnapshot.topic,
+      materialInterpretation: input.materialInterpretation,
       learningLoopId: input.learningLoop.id,
       responses: input.command.responses,
+      sourceEvidence:
+        input.sourceItems
+          ?.map((item) => ({
+            content: item.content ?? item.canonicalAnswer,
+            excerpt: item.content ?? item.visibleMaterial,
+            sourceMasterDataItemId: item.id,
+            sourceRef: item.sourceRef ?? item.id,
+            subtopic: item.subtopic ?? item.topic,
+            topic: item.topic
+          }))
+          .filter((item) => item.content && item.sourceRef) ?? [],
       runtimeConversationBinding: input.runtimeConversationBinding
     });
     if (!runtimeEvaluation.ok) {
       return runtimeEvaluation;
+    }
+
+    if (!Array.isArray(runtimeEvaluation.value.itemResults)) {
+      return err({
+        code: "VALIDATION_ERROR",
+        message: "Assessment attempt evaluation did not return a valid itemResults array."
+      });
+    }
+
+    if (!Array.isArray(runtimeEvaluation.value.knowledgeGaps)) {
+      return err({
+        code: "VALIDATION_ERROR",
+        message: "Assessment attempt evaluation did not return a valid knowledgeGaps array."
+      });
+    }
+
+    if (
+      typeof runtimeEvaluation.value.score !== "number" ||
+      !Number.isFinite(runtimeEvaluation.value.score)
+    ) {
+      return err({
+        code: "VALIDATION_ERROR",
+        message: "Assessment attempt evaluation did not return a valid score."
+      });
     }
 
     const evaluation = Evaluation.create(

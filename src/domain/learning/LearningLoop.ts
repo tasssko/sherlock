@@ -23,10 +23,18 @@ import type { DomainEventRecorder } from "../primitives/Event.js";
 export type LearningLoopPhase =
   | "initial-assessment"
   | "diagnosis"
+  | "loop-batching"
   | "study-planning"
   | "practice"
   | "reassessment"
   | "mastery-tracking";
+
+export type LearningLoopStatus =
+  | "active"
+  | "completed"
+  | "abandoned"
+  | "superseded"
+  | "failed";
 
 export interface LearningLoopSnapshot {
   id: LearningLoopId;
@@ -34,6 +42,7 @@ export interface LearningLoopSnapshot {
   objective: string;
   topic: string;
   phase: LearningLoopPhase;
+  status: LearningLoopStatus;
   assessmentIds: readonly AssessmentId[];
   attemptIds: readonly AttemptId[];
   evaluationIds: readonly EvaluationId[];
@@ -66,6 +75,7 @@ export class LearningLoop {
       objective: input.objective,
       topic: input.topic,
       phase: "initial-assessment",
+      status: "active",
       assessmentIds: [],
       attemptIds: [],
       evaluationIds: [],
@@ -87,6 +97,7 @@ export class LearningLoop {
   static rehydrate(snapshot: LearningLoopSnapshot): LearningLoop {
     return new LearningLoop({
       ...snapshot,
+      status: snapshot.status ?? "active",
       assessmentIds: [...snapshot.assessmentIds],
       attemptIds: [...snapshot.attemptIds],
       evaluationIds: [...snapshot.evaluationIds],
@@ -119,6 +130,10 @@ export class LearningLoop {
     return this.snapshot.phase;
   }
 
+  get status(): LearningLoopStatus {
+    return this.snapshot.status;
+  }
+
   get knowledgeGapIds(): readonly KnowledgeGapId[] {
     return this.snapshot.knowledgeGapIds;
   }
@@ -141,6 +156,10 @@ export class LearningLoop {
 
   isDiagnosed(): boolean {
     return this.snapshot.evaluationIds.length > 0 && this.snapshot.knowledgeGapIds.length > 0;
+  }
+
+  isActive(): boolean {
+    return this.snapshot.status === "active";
   }
 
   recordInitialAssessmentGenerated(
@@ -184,7 +203,7 @@ export class LearningLoop {
     const next = new LearningLoop({
       ...this.snapshot,
       evaluationIds: this.appendUnique(this.snapshot.evaluationIds, input.evaluationId),
-      phase: "study-planning",
+      phase: "loop-batching",
       updatedAt: new Date().toISOString()
     });
 
@@ -194,6 +213,19 @@ export class LearningLoop {
       input.evaluationId,
       input.score
     );
+    return next;
+  }
+
+  recordAssessmentSecured(events: DomainEventRecorder): LearningLoop {
+    events.assertWorkspace(this.snapshot.workspaceId);
+    const next = new LearningLoop({
+      ...this.snapshot,
+      phase: "mastery-tracking",
+      status: "completed",
+      updatedAt: new Date().toISOString()
+    });
+
+    events.recordLearningLoopCompleted(this.snapshot.id, this.snapshot.topic);
     return next;
   }
 
@@ -212,7 +244,7 @@ export class LearningLoop {
     const next = new LearningLoop({
       ...this.snapshot,
       knowledgeGapIds: nextKnowledgeGapIds,
-      phase: "study-planning",
+      phase: "loop-batching",
       updatedAt: new Date().toISOString()
     });
 
@@ -289,7 +321,8 @@ export class LearningLoop {
         input.activeReviewSessionId
       ),
       knowledgeGapIds: [...input.remainingKnowledgeGapIds],
-      phase: input.remainingKnowledgeGapIds.length > 0 ? "study-planning" : "mastery-tracking",
+      phase: input.remainingKnowledgeGapIds.length > 0 ? "loop-batching" : "mastery-tracking",
+      status: input.remainingKnowledgeGapIds.length > 0 ? "active" : "completed",
       updatedAt: new Date().toISOString()
     });
 
@@ -299,6 +332,25 @@ export class LearningLoop {
       input.activeReviewSessionId,
       input.masteryScore
     );
+    if (input.remainingKnowledgeGapIds.length === 0) {
+      events.recordLearningLoopCompleted(this.snapshot.id, this.snapshot.topic);
+    }
+    return next;
+  }
+
+  supersede(events: DomainEventRecorder): LearningLoop {
+    if (this.snapshot.status === "superseded") {
+      return this;
+    }
+
+    events.assertWorkspace(this.snapshot.workspaceId);
+    const next = new LearningLoop({
+      ...this.snapshot,
+      status: "superseded",
+      updatedAt: new Date().toISOString()
+    });
+
+    events.recordLearningLoopSuperseded(this.snapshot.id, this.snapshot.topic, this.snapshot.topic);
     return next;
   }
 

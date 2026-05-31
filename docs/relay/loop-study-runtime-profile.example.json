@@ -34,6 +34,11 @@
   "operatingInstructions": [],
   "defaultPolicy": {
     "requireApprovalForSideEffects": [],
+    "allowDirectCommandExecution": true,
+    "allowedCommandNames": [
+      "runtime.generate_structured_candidate",
+      "runtime.evaluate_structured_response"
+    ],
     "allowTaskCreationFromConversation": true,
     "allowMessageOnlyResponses": true,
     "allowSupervisorDelegation": true,

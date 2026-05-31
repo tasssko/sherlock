@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import { validateMasterDataInterpretationCandidate } from "../src/modules/masterData/MasterDataInterpretation.js";
 import { RelayAgentRuntime } from "../src/modules/runtime/RelayAgentRuntime.js";
 import {
   createLoopStudyRelayRuntimeProfile,
@@ -177,6 +178,196 @@ describe("Relay structured response handling", () => {
     );
   });
 
+  it("normalizes compatibility items that use itemType process into a valid candidate", async () => {
+    const processCompatibleResponse = structuredClone(relayCompatibilityCoastsResponse);
+    const items = Array.isArray(processCompatibleResponse.items)
+      ? processCompatibleResponse.items
+      : [];
+    items.push({
+      subject: "Geography",
+      yearGroup: "Year 7",
+      topic: "Coasts",
+      subtopic: "Transportation Processes",
+      itemType: "process",
+      content: "Longshore drift transports sediment along the coast.",
+      sourceRef: "Coasts > Transportation > compat-process-1"
+    });
+    processCompatibleResponse.items = items;
+    processCompatibleResponse.sourceMap = [
+      ...(Array.isArray(processCompatibleResponse.sourceMap)
+        ? processCompatibleResponse.sourceMap
+        : []),
+      {
+        sourceRef: "Coasts > Transportation > compat-process-1",
+        excerpt: "Longshore drift transports sediment along the coast."
+      }
+    ];
+
+    const fakeRelay = new FakeRelayHttpServer({
+      resolver: ({ operation, packet }) => ({
+        result: buildLoopStudyRelayResult(operation, packet),
+        responseContent: {
+          type: "json",
+          schema: "MasterDataInterpretationCandidate.v1",
+          value: processCompatibleResponse
+        },
+        responseText: "__invalid_json_that_should_not_be_used__"
+      })
+    });
+    const runtime = createTutorRelayRuntime(fakeRelay.fetch, {
+      info() {},
+      warn() {}
+    });
+
+    const result = await interpretWithRuntime(runtime);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      return;
+    }
+
+    expect(
+      result.value.interpretation.items.some(
+        (item) =>
+          item.sourceRef === "Coasts > Transportation > compat-process-1" &&
+          item.itemType === "fact"
+      )
+    ).toBe(true);
+  });
+
+  it("infers important dates from date items that only include the date in content", async () => {
+    const dateCompatibleResponse = structuredClone(relayCompatibilityCoastsResponse);
+    dateCompatibleResponse.importantDates = [];
+    dateCompatibleResponse.items = [
+      {
+        subject: "History",
+        yearGroup: "Year 7",
+        topic: "Mary I",
+        subtopic: "Timeline",
+        itemType: "date",
+        content: "10 July 1553 - Mary I was proclaimed queen.",
+        sourceRef: "Mary I > Timeline > compat-date-1"
+      }
+    ];
+    dateCompatibleResponse.sourceMap = [
+      {
+        sourceRef: "Mary I > Timeline > compat-date-1",
+        excerpt: "10 July 1553 - Mary I was proclaimed queen."
+      }
+    ];
+
+    const fakeRelay = new FakeRelayHttpServer({
+      resolver: ({ operation, packet }) => ({
+        result: buildLoopStudyRelayResult(operation, packet),
+        responseContent: {
+          type: "json",
+          schema: "MasterDataInterpretationCandidate.v1",
+          value: dateCompatibleResponse
+        },
+        responseText: "__invalid_json_that_should_not_be_used__"
+      })
+    });
+    const runtime = createTutorRelayRuntime(fakeRelay.fetch, {
+      info() {},
+      warn() {}
+    });
+
+    const result = await interpretWithRuntime(runtime);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      return;
+    }
+
+    expect(result.value.interpretation.importantDates).toContain("10 July 1553");
+    expect(
+      result.value.interpretation.items.some(
+        (item) =>
+          item.sourceRef === "Mary I > Timeline > compat-date-1" &&
+          item.itemType === "date" &&
+          item.date === "10 July 1553"
+      )
+    ).toBe(true);
+  });
+
+  it("accepts important date labels that include contextual text around the date", () => {
+    expect(() =>
+      validateMasterDataInterpretationCandidate({
+        schema: "MasterDataInterpretationCandidate.v1",
+        detectedSubject: "History",
+        detectedYearGroup: "Year 7",
+        mainTopic: "Mary I",
+        subtopics: ["Becomes Queen", "Wyatt's Rebellion"],
+        keyPeople: ["Mary I", "Lady Jane Grey"],
+        keyTerms: ["Succession", "Treason"],
+        importantDates: [
+          "1553 — Edward VI dies",
+          "10 July 1553 — Lady Jane Grey declared Queen",
+          "1554 — Wyatt's Rebellion"
+        ],
+        processes: ["Succession dispute", "Rebellion (Wyatt's Rebellion)"],
+        learnerFacingMaterialSummary:
+          "Mary I became queen in 1553 after Edward VI died, faced a succession dispute around Lady Jane Grey, and later overcame Wyatt's Rebellion in 1554.",
+        learningObjectives: [
+          {
+            id: "objective_1",
+            objective: "Describe how Mary I became queen in 1553 and explain why Wyatt's Rebellion followed.",
+            sourceRefs: [
+              "Mary I > Becomes Queen > fact-1",
+              "Wyatt's Rebellion > event-1"
+            ]
+          }
+        ],
+        sourceMap: [
+          {
+            sourceRef: "Mary I > Becomes Queen > fact-1",
+            excerpt: "She became Queen of England in 1553 after Edward VI died."
+          },
+          {
+            sourceRef: "Mary I > Lady Jane Grey > event-1",
+            excerpt: "Lady Jane Grey was declared Queen on 10 July 1553."
+          },
+          {
+            sourceRef: "Wyatt's Rebellion > event-1",
+            excerpt: "Wyatt's Rebellion took place in 1554."
+          }
+        ],
+        items: [
+          {
+            subject: "History",
+            yearGroup: "Year 7",
+            topic: "Mary I",
+            subtopic: "Becomes Queen",
+            itemType: "event",
+            content: "She became Queen of England in 1553 after Edward VI died.",
+            sourceRef: "Mary I > Becomes Queen > fact-1",
+            date: "1553"
+          },
+          {
+            subject: "History",
+            yearGroup: "Year 7",
+            topic: "Mary I",
+            subtopic: "Lady Jane Grey",
+            itemType: "event",
+            content: "Lady Jane Grey was declared Queen on 10 July 1553.",
+            sourceRef: "Mary I > Lady Jane Grey > event-1",
+            date: "10 July 1553"
+          },
+          {
+            subject: "History",
+            yearGroup: "Year 7",
+            topic: "Mary I",
+            subtopic: "Wyatt's Rebellion",
+            itemType: "event",
+            content: "Wyatt's Rebellion took place in 1554.",
+            sourceRef: "Wyatt's Rebellion > event-1",
+            date: "1554"
+          }
+        ]
+      })
+    ).not.toThrow();
+  });
+
   it("accepts transition-era structuredOutput.valueJson wrappers", async () => {
     const fakeRelay = new FakeRelayHttpServer({
       resolver: ({ operation, packet }) => ({
@@ -247,6 +438,110 @@ describe("Relay structured response handling", () => {
           type: "text",
           schema: "MasterDataInterpretationCandidate.v1",
           value: `Tutor summary:\n\n\`\`\`json\n${JSON.stringify(candidate, null, 2)}\n\`\`\``
+        },
+        responseText: "__invalid_json_that_should_not_be_used__"
+      })
+    });
+    const runtime = createTutorRelayRuntime(fakeRelay.fetch, {
+      info() {},
+      warn() {}
+    });
+
+    const result = await interpretWithRuntime(runtime);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      return;
+    }
+
+    expect(result.value.interpretation.mainTopic).toBe("Coasts");
+    expect(result.value.interpretation.learningObjectives.length).toBeGreaterThan(0);
+  });
+
+  it("accepts source-grounded objectives even when they do not repeat a top-level anchor verbatim", async () => {
+    const candidate = structuredClone(relayCompatibilityCoastsResponse);
+    candidate.learningObjectives = [
+      "Explain how coastlines are shaped over time using the source material."
+    ];
+
+    const fakeRelay = new FakeRelayHttpServer({
+      resolver: ({ operation, packet }) => ({
+        result: buildLoopStudyRelayResult(operation, packet),
+        responseContent: {
+          type: "json",
+          schema: "MasterDataInterpretationCandidate.v1",
+          value: candidate
+        },
+        responseText: "__invalid_json_that_should_not_be_used__"
+      })
+    });
+    const runtime = createTutorRelayRuntime(fakeRelay.fetch, {
+      info() {},
+      warn() {}
+    });
+
+    const result = await interpretWithRuntime(runtime);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      return;
+    }
+
+    expect(result.value.interpretation.learningObjectives[0]?.objective).toContain(
+      "coastlines are shaped"
+    );
+  });
+
+  it("accepts array-based Relay content blocks with a nested json block", async () => {
+    const fakeRelay = new FakeRelayHttpServer({
+      resolver: ({ operation, packet }) => ({
+        result: buildLoopStudyRelayResult(operation, packet),
+        responseContent: [
+          {
+            type: "output_text",
+            text: "Tutor summary before the structured candidate."
+          },
+          {
+            type: "json",
+            json: relayCompatibilityCoastsResponse
+          }
+        ],
+        responseText: "__invalid_json_that_should_not_be_used__"
+      })
+    });
+    const runtime = createTutorRelayRuntime(fakeRelay.fetch, {
+      info() {},
+      warn() {}
+    });
+
+    const result = await interpretWithRuntime(runtime);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      return;
+    }
+
+    expect(result.value.interpretation.mainTopic).toBe("Coasts");
+    expect(result.value.interpretation.detectedSubject).toBe("Geography");
+  });
+
+  it("accepts nested message content that wraps a json response block", async () => {
+    const fakeRelay = new FakeRelayHttpServer({
+      resolver: ({ operation, packet }) => ({
+        result: buildLoopStudyRelayResult(operation, packet),
+        responseContent: {
+          message: {
+            content: [
+              {
+                type: "text",
+                text: "Tutor completed the interpretation."
+              },
+              {
+                type: "json",
+                value: relayCompatibilityCoastsResponse
+              }
+            ]
+          }
         },
         responseText: "__invalid_json_that_should_not_be_used__"
       })

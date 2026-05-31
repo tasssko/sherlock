@@ -122,10 +122,17 @@ export const policyCatalog: Record<PolicyId, Policy> = {
           });
         }
 
-        if (artifactContent.items.length !== assessmentContext.questionCount) {
+        if (artifactContent.items.length !== artifactContent.questionCount) {
           return err({
             code: "POLICY_VIOLATION",
-            message: "Assessment item count does not match the requested question count."
+            message: "Assessment item count does not match the generated assessment blueprint."
+          });
+        }
+
+        if (artifactContent.items.length > assessmentContext.questionCount) {
+          return err({
+            code: "POLICY_VIOLATION",
+            message: "Assessment item count exceeds the requested assessment limit."
           });
         }
       }
@@ -190,6 +197,13 @@ export function evaluatePolicies(
   input: PolicyEvaluationInput,
   events: DomainEventRecorder
 ): Result<void> {
+  if (!input.artifactContent || typeof input.artifactContent !== "object") {
+    return err({
+      code: "VALIDATION_ERROR",
+      message: "Generated artifact content was missing or malformed."
+    });
+  }
+
   for (const policyId of policyIds) {
     const policy = policyCatalog[policyId];
     const evaluation = policy.evaluate(input);

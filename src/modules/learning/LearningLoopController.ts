@@ -1,5 +1,6 @@
 import { err, ok, type Result } from "../../domain/primitives/result.js";
 import type { DomainEvent } from "../../domain/primitives/Event.js";
+import { LearningLoop } from "../../domain/learning/LearningLoop.js";
 import type { LearningLoopResumeResponse } from "../../domain/study/LearningLoops.js";
 import type { LearningLoopRepository } from "../planning/LearningLoopRepository.js";
 import type { Task } from "../../domain/primitives/Task.js";
@@ -30,8 +31,17 @@ export class LearningLoopController {
       });
     }
 
+    if (learningLoop.status === "superseded") {
+      return err({
+        code: "STATE_CONFLICT",
+        message: `Learning loop ${learningLoopId} has been superseded and can no longer be resumed.`
+      });
+    }
+
+    const normalizedLearningLoop = normalizeLoopForProjection(learningLoop);
+
     const currentAssessment = located.record.assessments
-      .filter((candidate) => candidate.learningLoopId === learningLoop.id)
+      .filter((candidate) => candidate.learningLoopId === normalizedLearningLoop.id)
       .at(-1);
     const assessmentArtifact = currentAssessment?.toSnapshot().artifactId
       ? located.record.artifacts.find(
@@ -47,35 +57,40 @@ export class LearningLoopController {
           .at(-1)
       : undefined;
     const knowledgeGaps = located.record.knowledgeGaps.filter((candidate) =>
-      learningLoop.knowledgeGapIds.includes(candidate.id)
+      normalizedLearningLoop.knowledgeGapIds.includes(candidate.id)
     );
-    const masteryProfile = learningLoop.masteryProfileId
-      ? located.record.masteryProfiles.find((candidate) => candidate.id === learningLoop.masteryProfileId)
+    const masteryProfile = normalizedLearningLoop.masteryProfileId
+      ? located.record.masteryProfiles.find((candidate) => candidate.id === normalizedLearningLoop.masteryProfileId)
       : undefined;
     const studyPlanArtifact = located.record.artifacts
       .filter(
         (candidate) =>
-          learningLoop.toSnapshot().artifactIds.includes(candidate.id) && candidate.type === "study-plan"
+          normalizedLearningLoop.toSnapshot().artifactIds.includes(candidate.id) && candidate.type === "study-plan"
       )
       .at(-1);
     const workPlan = located.record.workPlans
-      .filter((candidate) => learningLoop.toSnapshot().workPlanIds.includes(candidate.id))
+      .filter((candidate) => normalizedLearningLoop.toSnapshot().workPlanIds.includes(candidate.id))
       .at(-1);
     const studyPlanTasks =
       studyPlanArtifact?.taskId
         ? this.collectTaskSubgraph(located.record.tasks, studyPlanArtifact.taskId)
         : [];
     const practiceActivities = located.record.practiceActivities.filter((candidate) =>
-      candidate.learningLoopId === learningLoop.id
+      candidate.learningLoopId === normalizedLearningLoop.id
     );
     const currentPracticeActivity = practiceActivities.at(-1);
+    const loopBatch = located.record.loopBatches
+      .filter((candidate) => candidate.learningLoopId === normalizedLearningLoop.id)
+      .at(-1);
+    const projectedLoopBatch =
+      normalizedLearningLoop.phase === "mastery-tracking" ? undefined : loopBatch;
     const latestActiveReviewSession = currentPracticeActivity?.reviewSessionIds.length
       ? located.record.activeReviewSessions.find(
           (candidate) =>
             candidate.id === currentPracticeActivity.reviewSessionIds[currentPracticeActivity.reviewSessionIds.length - 1]
         )
       : located.record.activeReviewSessions
-          .filter((candidate) => candidate.toSnapshot().learningLoopId === learningLoop.id)
+          .filter((candidate) => candidate.toSnapshot().learningLoopId === normalizedLearningLoop.id)
           .at(-1);
 
     const relatedTaskIds = new Set<string>();
@@ -90,13 +105,13 @@ export class LearningLoopController {
       relatedTaskIds.add(task.id);
     }
 
-    const relatedArtifactIds = new Set(learningLoop.toSnapshot().artifactIds);
-    const relatedAssessmentIds = new Set(learningLoop.toSnapshot().assessmentIds);
-    const relatedAttemptIds = new Set(learningLoop.toSnapshot().attemptIds);
-    const relatedEvaluationIds = new Set(learningLoop.toSnapshot().evaluationIds);
-    const relatedPracticeActivityIds = new Set(learningLoop.toSnapshot().practiceActivityIds);
-    const relatedWorkPlanIds = new Set(learningLoop.toSnapshot().workPlanIds);
-    const relatedReviewIds = new Set(learningLoop.toSnapshot().activeReviewSessionIds);
+    const relatedArtifactIds = new Set(normalizedLearningLoop.toSnapshot().artifactIds);
+    const relatedAssessmentIds = new Set(normalizedLearningLoop.toSnapshot().assessmentIds);
+    const relatedAttemptIds = new Set(normalizedLearningLoop.toSnapshot().attemptIds);
+    const relatedEvaluationIds = new Set(normalizedLearningLoop.toSnapshot().evaluationIds);
+    const relatedPracticeActivityIds = new Set(normalizedLearningLoop.toSnapshot().practiceActivityIds);
+    const relatedWorkPlanIds = new Set(normalizedLearningLoop.toSnapshot().workPlanIds);
+    const relatedReviewIds = new Set(normalizedLearningLoop.toSnapshot().activeReviewSessionIds);
 
     const events = located.record.events.filter((event) =>
       this.isLoopRelatedEvent(event, {
@@ -115,13 +130,14 @@ export class LearningLoopController {
     return ok(
       this.projector.project({
         workspace: located.record.workspace,
-        learningLoop,
+        learningLoop: normalizedLearningLoop,
         currentAssessment,
         assessmentArtifact: assessmentArtifact as never,
         latestAttempt,
         latestEvaluation,
         knowledgeGaps,
         masteryProfile,
+        loopBatch: projectedLoopBatch,
         studyPlan:
           studyPlanArtifact && workPlan && studyPlanTasks.length > 0
             ? {
@@ -193,4 +209,20 @@ export class LearningLoopController {
       (typeof payload.workPlanId === "string" && input.relatedWorkPlanIds.has(payload.workPlanId))
     );
   }
+}
+
+function normalizeLoopForProjection(learningLoop: LearningLoop): LearningLoop {
+  if (
+    learningLoop.phase === "loop-batching" &&
+    learningLoop.evaluationIds.length > 0 &&
+    learningLoop.knowledgeGapIds.length === 0
+  ) {
+    return LearningLoop.rehydrate({
+      ...learningLoop.toSnapshot(),
+      phase: "mastery-tracking",
+      status: "completed"
+    });
+  }
+
+  return learningLoop;
 }

@@ -4,6 +4,7 @@ export type NextActionKind =
   | "complete-initial-assessment"
   | "review-diagnosis"
   | "review-study-plan"
+  | "start-loop-unit"
   | "complete-practice-activity"
   | "generate-practice-activity"
   | "track-mastery";

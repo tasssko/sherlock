@@ -10,6 +10,8 @@ import {
   type LearningLoopRepository
 } from "../planning/LearningLoopRepository.js";
 import { AssessmentAttemptEvaluator } from "./AssessmentAttemptEvaluator.js";
+import { LearningLoopBatch } from "../../domain/learning/LearningLoopBatch.js";
+import type { MasterDataItem, MasterDataSource } from "../../domain/learning/MasterData.js";
 import type { AgentRuntime } from "../runtime/AgentRuntime.js";
 import { FixtureAgentRuntime } from "../runtime/FixtureAgentRuntime.js";
 import { NextActionProjector } from "../learning/NextActionProjector.js";
@@ -21,11 +23,13 @@ export class AssessmentAttemptController
 {
   private readonly evaluator: AssessmentAttemptEvaluator;
   private readonly nextActionProjector = new NextActionProjector();
+  private readonly runtime: AgentRuntime;
 
   constructor(
     private readonly repository: LearningLoopRepository,
     runtime: AgentRuntime = new FixtureAgentRuntime()
   ) {
+    this.runtime = runtime;
     this.evaluator = new AssessmentAttemptEvaluator(runtime);
   }
 
@@ -59,11 +63,30 @@ export class AssessmentAttemptController
     }
 
     const events = createDomainEventRecorder(located.record.workspace.id);
+    const loopSourceRecords = this.repository.findMasterDataBySourceIds(
+      learningLoop.toSnapshot().sourceIds
+    );
+    const fallbackTopicSourceRecords = this.repository.findMasterDataByTopic(learningLoop.topic);
+    const selectedSourceRecord =
+      rankSourceRecords(loopSourceRecords).find((entry) => entry.source.acceptedInterpretation) ??
+      rankSourceRecords(fallbackTopicSourceRecords).find(
+        (entry) => entry.source.acceptedInterpretation
+      );
+    const materialInterpretation = selectedSourceRecord?.source.acceptedInterpretation;
+    const sourceItems = selectedSourceRecord?.items ?? loopSourceRecords.flatMap((entry) => entry.items);
+    if (!materialInterpretation) {
+      return err({
+        code: "VALIDATION_ERROR",
+        message: `No accepted material interpretation was found for topic ${learningLoop.topic}.`
+      });
+    }
     const evaluation = await this.evaluator.evaluate({
       assessment,
       command,
       events,
       learningLoop,
+      materialInterpretation,
+      sourceItems,
       runtimeConversationBinding: located.record.runtimeConversationBindings.find(
         (binding) => binding.learningLoopId === learningLoop.id
       )
@@ -72,10 +95,93 @@ export class AssessmentAttemptController
       return evaluation;
     }
 
+    if (evaluation.value.knowledgeGaps.length === 0) {
+      const securedLearningLoop = evaluation.value.learningLoop.recordAssessmentSecured(events);
+      const newEvents = events.all();
+      const workspace = located.record.workspace.appendEventLedger(newEvents.map((event) => event.id));
+      const updatedRecord = appendSucceededRuntimeTrace(
+        createLearningLoopRecord({
+          workspace,
+          tasks: [...located.record.tasks],
+          workPlans: [...located.record.workPlans],
+          artifacts: [...located.record.artifacts],
+          events: [...located.record.events, ...newEvents],
+          learningLoops: [
+            ...located.record.learningLoops.filter((candidate) => candidate.id !== learningLoop.id),
+            securedLearningLoop
+          ],
+          assessments: [...located.record.assessments],
+          attempts: [...located.record.attempts, evaluation.value.attempt],
+          evaluations: [...located.record.evaluations, evaluation.value.evaluation],
+          knowledgeGaps: [...located.record.knowledgeGaps],
+          masteryProfiles: [...located.record.masteryProfiles],
+          practiceActivities: [...located.record.practiceActivities],
+          activeReviewSessions: [...located.record.activeReviewSessions],
+          loopBatches: located.record.loopBatches.filter(
+            (candidate) => candidate.learningLoopId !== securedLearningLoop.id
+          ),
+          runtimeConversationBindings: upsertRuntimeConversationBinding(
+            located.record.runtimeConversationBindings,
+            evaluation.value.runtimeConversationBinding
+          ),
+          runtimeTraces: [...located.record.runtimeTraces]
+        }),
+        {
+          seed: evaluation.value.runtimeTrace,
+          producedDomainIds: [evaluation.value.attempt.id, evaluation.value.evaluation.id]
+        }
+      );
+
+      this.repository.saveRecord(located.key, updatedRecord);
+
+      return ok({
+        learningLoopId: securedLearningLoop.id,
+        phase: securedLearningLoop.phase,
+        nextAction: this.nextActionProjector.project({
+          learningLoop: securedLearningLoop
+        }),
+        workspace: workspace.toSnapshot(),
+        learningLoop: securedLearningLoop.toSnapshot(),
+        attempt: evaluation.value.attempt.toSnapshot(),
+        evaluation: evaluation.value.evaluation.toSnapshot(),
+        knowledgeGaps: [],
+        events: newEvents
+      });
+    }
+
+    const loopBatchCandidate = await this.runtime.generateLearningLoopBatch({
+      learningLoopId: evaluation.value.learningLoop.id,
+      materialInterpretation,
+      diagnosedGaps: evaluation.value.knowledgeGaps.map((gap) => gap.toSnapshot()),
+      evaluation: {
+        itemResults: evaluation.value.evaluation.toSnapshot().itemResults,
+        score: evaluation.value.evaluation.toSnapshot().score
+      },
+      learnerYearGroup: located.record.workspace.learner.yearGroup,
+      targetLoopDurationMinutes: 5,
+      desiredLoopCount: 3,
+      runtimeConversationBinding:
+        evaluation.value.runtimeConversationBinding ??
+        located.record.runtimeConversationBindings.find(
+          (binding) => binding.learningLoopId === learningLoop.id
+        )
+    });
+    if (!loopBatchCandidate.ok) {
+      return loopBatchCandidate;
+    }
+
+    const loopBatch = LearningLoopBatch.create({
+      learningLoopId: evaluation.value.learningLoop.id,
+      overview: loopBatchCandidate.value.overview,
+      targetDurationMinutes: loopBatchCandidate.value.targetDurationMinutes,
+      units: loopBatchCandidate.value.units
+    });
+
     const newEvents = events.all();
     const workspace = located.record.workspace.appendEventLedger(newEvents.map((event) => event.id));
     const updatedRecord = appendSucceededRuntimeTrace(
-      createLearningLoopRecord({
+      appendSucceededRuntimeTrace(
+        createLearningLoopRecord({
       workspace,
       tasks: [...located.record.tasks],
       workPlans: [...located.record.workPlans],
@@ -92,9 +198,16 @@ export class AssessmentAttemptController
       masteryProfiles: [...located.record.masteryProfiles],
       practiceActivities: [...located.record.practiceActivities],
       activeReviewSessions: [...located.record.activeReviewSessions],
+      loopBatches: [
+        ...located.record.loopBatches.filter(
+          (candidate) => candidate.learningLoopId !== evaluation.value.learningLoop.id
+        ),
+        loopBatch
+      ],
       runtimeConversationBindings: upsertRuntimeConversationBinding(
         located.record.runtimeConversationBindings,
-        evaluation.value.runtimeConversationBinding
+        loopBatchCandidate.value.runtimeConversationBinding ??
+          evaluation.value.runtimeConversationBinding
       ),
       runtimeTraces: [...located.record.runtimeTraces]
     }),
@@ -106,6 +219,11 @@ export class AssessmentAttemptController
           ...evaluation.value.knowledgeGaps.map((gap) => gap.id)
         ]
       }
+      ),
+      {
+        seed: loopBatchCandidate.value.runtimeTrace,
+        producedDomainIds: [loopBatch.id, ...loopBatch.toSnapshot().units.map((unit) => unit.id)]
+      }
     );
 
     this.repository.saveRecord(located.key, updatedRecord);
@@ -114,14 +232,36 @@ export class AssessmentAttemptController
       learningLoopId: evaluation.value.learningLoop.id,
       phase: evaluation.value.learningLoop.phase,
       nextAction: this.nextActionProjector.project({
-        learningLoop: evaluation.value.learningLoop
+        learningLoop: evaluation.value.learningLoop,
+        loopBatch
       }),
       workspace: workspace.toSnapshot(),
       learningLoop: evaluation.value.learningLoop.toSnapshot(),
       attempt: evaluation.value.attempt.toSnapshot(),
       evaluation: evaluation.value.evaluation.toSnapshot(),
       knowledgeGaps: evaluation.value.knowledgeGaps.map((gap) => gap.toSnapshot()),
+      loopBatch: loopBatch.toSnapshot(),
       events: newEvents
     });
   }
+}
+
+function rankSourceRecords(
+  entries: readonly {
+    source: MasterDataSource;
+    items: readonly MasterDataItem[];
+  }[]
+): typeof entries {
+  return [...entries].sort((left, right) => {
+    const leftAccepted = Number(Boolean(left.source.acceptedInterpretation));
+    const rightAccepted = Number(Boolean(right.source.acceptedInterpretation));
+    if (leftAccepted !== rightAccepted) {
+      return rightAccepted - leftAccepted;
+    }
+
+    return (
+      Date.parse(right.source.toSnapshot().uploadedAt) -
+      Date.parse(left.source.toSnapshot().uploadedAt)
+    );
+  });
 }

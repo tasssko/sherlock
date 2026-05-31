@@ -1,6 +1,7 @@
 import type {
   AssessmentDifficulty,
   AssessmentItem,
+  AssessmentQuestionType,
   EvaluationItemResult
 } from "../../domain/learning/Assessment.js";
 import type { KnowledgeGapSeverity } from "../../domain/learning/LearningLoop.js";
@@ -17,13 +18,17 @@ import type {
 import type { MasterDataItem, MasterDataSource } from "../../domain/learning/MasterData.js";
 import type { ContextAssumption } from "../../domain/primitives/Context.js";
 import type { Result } from "../../domain/primitives/result.js";
-import type { AssessmentArtifactContent } from "../../domain/study/AssessmentGeneration.js";
+import type {
+  AssessmentArtifactContent,
+  AssessmentBlueprint
+} from "../../domain/study/AssessmentGeneration.js";
 import type { StudyPlanArtifactContent } from "../../domain/study/StudyPlanning.js";
 import type { RuntimeTraceSeed } from "./RuntimeTrace.js";
 import type { RuntimeConversationBinding } from "./RuntimeConversationBinding.js";
 import type {
   MasterDataInterpretationCandidate
 } from "../masterData/MasterDataInterpretation.js";
+import type { LearningLoopBatchCandidate } from "../loopBatch/LearningLoopBatchValidation.js";
 
 export interface AssessmentItemCandidate extends AssessmentItem {}
 
@@ -44,9 +49,14 @@ export interface AssessmentAttemptEvaluationCandidate {
 
 export interface InitialAssessmentGenerationCandidate {
   artifactContent: AssessmentArtifactContent;
+  blueprint?: AssessmentBlueprintCandidate;
   runtimeConversationBinding?: RuntimeConversationBinding;
   runtimeTrace?: RuntimeTraceSeed;
   items: readonly AssessmentItemCandidate[];
+}
+
+export interface AssessmentBlueprintCandidate extends AssessmentBlueprint {
+  questionTypeMix: readonly AssessmentQuestionType[];
 }
 
 export interface StudyPlanGenerationCandidate {
@@ -62,6 +72,14 @@ export interface PracticeActivityGenerationCandidate {
   runtimeConversationBinding?: RuntimeConversationBinding;
   runtimeTrace?: RuntimeTraceSeed;
   flashcardSet: FlashcardSet;
+}
+
+export interface LearningLoopBatchGenerationCandidate {
+  overview: string;
+  targetDurationMinutes: number;
+  units: LearningLoopBatchCandidate["units"];
+  runtimeConversationBinding?: RuntimeConversationBinding;
+  runtimeTrace?: RuntimeTraceSeed;
 }
 
 export interface ActiveReviewEvaluationCandidate {
@@ -95,10 +113,19 @@ export interface AgentRuntime {
       topic: string;
     };
     contextTopic: string;
+    materialInterpretation?: MasterDataInterpretationCandidate;
     learningLoopId: string;
     responses: readonly {
       answer: string;
       itemId: string;
+    }[];
+    sourceEvidence?: readonly {
+      content: string;
+      excerpt: string;
+      sourceMasterDataItemId?: string;
+      sourceRef: string;
+      subtopic: string;
+      topic: string;
     }[];
     runtimeConversationBinding?: RuntimeConversationBinding;
   }): Promise<Result<AssessmentAttemptEvaluationCandidate>> | Result<AssessmentAttemptEvaluationCandidate>;
@@ -140,6 +167,25 @@ export interface AgentRuntime {
     }[];
     runtimeConversationBinding?: RuntimeConversationBinding;
   }): Promise<Result<PracticeActivityGenerationCandidate>> | Result<PracticeActivityGenerationCandidate>;
+  generateLearningLoopBatch(input: {
+    desiredLoopCount: number;
+    learningLoopId: string;
+    materialInterpretation: MasterDataInterpretationCandidate;
+    targetLoopDurationMinutes: number;
+    diagnosedGaps: readonly {
+      description: string;
+      evidence: string;
+      id: string;
+      severity: "high" | "medium" | "low";
+      topic: string;
+    }[];
+    evaluation: {
+      itemResults: readonly EvaluationItemResult[];
+      score: number;
+    };
+    learnerYearGroup: string;
+    runtimeConversationBinding?: RuntimeConversationBinding;
+  }): Promise<Result<LearningLoopBatchGenerationCandidate>> | Result<LearningLoopBatchGenerationCandidate>;
   generateStudyPlan(input: {
     context: StudyPlanningContext;
     learningLoopId: string;

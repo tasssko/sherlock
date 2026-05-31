@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { loadLoopStudyRuntimeConfig } from "../src/modules/runtime/LoopStudyRuntimeConfig.js";
 
 describe("Loop study runtime config", () => {
-  it("defaults to fixture mode with no Relay environment", () => {
+  it("defaults to fixture mode with no intelligence environment", () => {
     const config = loadLoopStudyRuntimeConfig({});
 
     expect(config).toEqual({
@@ -11,9 +11,24 @@ describe("Loop study runtime config", () => {
     });
   });
 
-  it("boots Relay mode with only the loop.study runtime flag and Relay API URL", () => {
+  it("boots OpenAI mode with only the loop.study intelligence flag and OpenAI API key", () => {
     const config = loadLoopStudyRuntimeConfig({
-      LOOP_STUDY_AGENT_RUNTIME: "relay",
+      LOOP_STUDY_INTELLIGENCE: "openai",
+      OPENAI_API_KEY: "test-key"
+    });
+
+    expect(config.runtimeMode).toBe("openai");
+    expect(config.compatibilityWarnings).toEqual([]);
+    expect(config.openai).toEqual({
+      apiKey: "test-key",
+      baseUrl: "https://api.openai.com/v1",
+      model: "gpt-4.1-mini"
+    });
+  });
+
+  it("boots Relay mode only when explicitly requested", () => {
+    const config = loadLoopStudyRuntimeConfig({
+      LOOP_STUDY_INTELLIGENCE: "relay",
       LOOP_STUDY_RELAY_API_URL: "http://relay.test"
     });
 
@@ -68,7 +83,7 @@ describe("Loop study runtime config", () => {
     );
     expect(config.compatibilityWarnings).toEqual(
       expect.arrayContaining([
-        "SHERLOCK_AGENT_RUNTIME is deprecated. Use LOOP_STUDY_AGENT_RUNTIME.",
+        "SHERLOCK_AGENT_RUNTIME is deprecated. Use LOOP_STUDY_INTELLIGENCE=relay.",
         "RELAY_API_URL is deprecated. Use LOOP_STUDY_RELAY_API_URL.",
         "RELAY_WORKSPACE_ID is deprecated. Use LOOP_STUDY_RELAY_WORKSPACE_ID.",
         "RELAY_DEFAULT_AGENT_HANDLE is deprecated. Use LOOP_STUDY_RELAY_TEMPLATE_PATH or a versioned profile instead."
@@ -76,10 +91,22 @@ describe("Loop study runtime config", () => {
     );
   });
 
+  it("supports deprecated LOOP_STUDY_AGENT_RUNTIME through a compatibility layer", () => {
+    const config = loadLoopStudyRuntimeConfig({
+      LOOP_STUDY_AGENT_RUNTIME: "relay",
+      LOOP_STUDY_RELAY_API_URL: "http://relay.test"
+    });
+
+    expect(config.runtimeMode).toBe("relay");
+    expect(config.compatibilityWarnings).toContain(
+      "LOOP_STUDY_AGENT_RUNTIME is deprecated. Use LOOP_STUDY_INTELLIGENCE."
+    );
+  });
+
   it("loads a custom Relay runtime profile from LOOP_STUDY_RELAY_TEMPLATE_PATH", () => {
     const config = loadLoopStudyRuntimeConfig(
       {
-        LOOP_STUDY_AGENT_RUNTIME: "relay",
+        LOOP_STUDY_INTELLIGENCE: "relay",
         LOOP_STUDY_RELAY_API_URL: "http://relay.test",
         LOOP_STUDY_RELAY_TEMPLATE_PATH: "/tmp/loop-study-profile.json"
       },

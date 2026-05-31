@@ -4,6 +4,7 @@ import type { InitialAssessmentController } from "../src/modules/assessment/Init
 import type { MasterDataUploadController } from "../src/modules/assessment/MasterDataUploadController.js";
 import type { StudyPlanController } from "../src/modules/planning/StudyPlanController.js";
 import type { PracticeActivityController } from "../src/modules/practice/PracticeActivityController.js";
+import type { LearningLoopController } from "../src/modules/learning/LearningLoopController.js";
 
 const validStudyPlanBody = {
   learnerName: "Year 7 learner",
@@ -398,6 +399,38 @@ describe("Route boundaries", () => {
       expect(response.json()).toMatchObject({
         code: "VALIDATION_ERROR",
         error: "Upload failed."
+      });
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("maps superseded learning-loop resume requests to 409", async () => {
+    const controller = {
+      get() {
+        return {
+          ok: false as const,
+          error: {
+            code: "STATE_CONFLICT" as const,
+            message: "Learning loop loop_old has been superseded and can no longer be resumed."
+          }
+        };
+      }
+    } as unknown as LearningLoopController;
+    const server = await createServer({
+      learningLoopController: controller
+    });
+
+    try {
+      const response = await server.inject({
+        method: "GET",
+        url: "/v1/learning-loops/loop_old"
+      });
+
+      expect(response.statusCode).toBe(409);
+      expect(response.json()).toMatchObject({
+        code: "STATE_CONFLICT",
+        error: "Learning loop loop_old has been superseded and can no longer be resumed."
       });
     } finally {
       await server.close();

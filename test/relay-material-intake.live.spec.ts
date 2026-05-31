@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { extname } from "node:path";
 import { describe, expect, it } from "vitest";
 import { createServer } from "../src/app/api/createServer.js";
+import { AssessmentAttemptController } from "../src/modules/assessment/AssessmentAttemptController.js";
 import { InitialAssessmentController } from "../src/modules/assessment/InitialAssessmentController.js";
 import { MasterDataUploadController } from "../src/modules/assessment/MasterDataUploadController.js";
 import { LearningLoopController } from "../src/modules/learning/LearningLoopController.js";
@@ -263,9 +264,14 @@ describe.runIf(shouldRunLiveRelaySmoke)(
           undefined,
           runtime
         );
+        const assessmentAttemptController = new AssessmentAttemptController(
+          repository,
+          runtime
+        );
         const learningLoopController = new LearningLoopController(repository);
         const server = await createServer({
           agentRuntime: runtime,
+          assessmentAttemptController,
           masterDataUploadController: uploadController,
           initialAssessmentController,
           learningLoopController
@@ -325,9 +331,16 @@ describe.runIf(shouldRunLiveRelaySmoke)(
           );
           expect(interpretMessageCapture?.requestBody?.content).toMatchObject({
             type: "command",
-            name: "loop_study.interpret_master_data",
+            name: "runtime.generate_structured_candidate",
             expectedOutputSchema: "MasterDataInterpretationCandidate.v1"
           });
+          expect(
+            (
+              interpretMessageCapture?.requestBody?.content as
+                | { input?: Record<string, unknown> }
+                | undefined
+            )?.input?.candidateKind
+          ).toBe("master_data_interpretation");
 
           const interpretRelayResponseContent = findRelayResponseContent(
             relayCaptures,
@@ -368,7 +381,7 @@ describe.runIf(shouldRunLiveRelaySmoke)(
           );
           expect(assessmentMessageCapture?.requestBody?.content).toMatchObject({
             type: "command",
-            name: "loop_study.generate_initial_assessment",
+            name: "runtime.generate_structured_candidate",
             expectedOutputSchema: "InitialAssessmentGenerationCandidate"
           });
 
@@ -380,10 +393,11 @@ describe.runIf(shouldRunLiveRelaySmoke)(
               | undefined
           )?.input;
           expect(assessmentCommandInput).toBeDefined();
+          expect(assessmentCommandInput?.candidateKind).toBe("initial_assessment");
           expect(assessmentCommandInput?.materialInterpretation).toMatchObject({
             mainTopic: source?.acceptedInterpretation?.mainTopic,
-            subject: source?.acceptedInterpretation?.detectedSubject,
-            yearGroup: source?.acceptedInterpretation?.detectedYearGroup,
+            detectedSubject: source?.acceptedInterpretation?.detectedSubject,
+            detectedYearGroup: source?.acceptedInterpretation?.detectedYearGroup,
             learnerFacingMaterialSummary:
               source?.acceptedInterpretation?.learnerFacingMaterialSummary
           });
@@ -426,8 +440,25 @@ describe.runIf(shouldRunLiveRelaySmoke)(
           expect(
             Array.isArray(assessmentCommandInput?.materialInterpretation?.learningObjectives) &&
               assessmentCommandInput.materialInterpretation.learningObjectives.every(
-                (objective) => acceptedObjectiveTexts.has(String(objective))
+                (objective) =>
+                  typeof objective === "object" &&
+                  objective !== null &&
+                  acceptedObjectiveTexts.has(
+                    String((objective as { objective?: unknown }).objective)
+                  )
               )
+          ).toBe(true);
+          expect(
+            Array.isArray(assessmentCommandInput?.materialInterpretation?.sourceMap) &&
+              assessmentCommandInput.materialInterpretation.sourceMap.length > 0
+          ).toBe(true);
+          expect(
+            Array.isArray(assessmentCommandInput?.materialInterpretation?.items) &&
+              assessmentCommandInput.materialInterpretation.items.length > 0
+          ).toBe(true);
+          expect(
+            Array.isArray(assessmentCommandInput?.materialInterpretation?.keyTerms) &&
+              assessmentCommandInput.materialInterpretation.keyTerms.length > 0
           ).toBe(true);
 
           const assessmentRelayResponseContent = findRelayResponseContent(
@@ -489,6 +520,129 @@ describe.runIf(shouldRunLiveRelaySmoke)(
             )
           ).toBe(true);
           expect(JSON.stringify(diagnostics)).not.toContain(rawSourceContent.slice(0, 80));
+
+          const assessmentItems = assessmentBody.assessment.items as Array<{
+            canonicalAnswer: string;
+            id: string;
+            prompt: string;
+          }>;
+          expect(assessmentItems).toHaveLength(3);
+          const partiallyCorrectAnswer =
+            assessmentItems[1]?.canonicalAnswer.split(/[.!?]/)[0]?.trim() ||
+            assessmentItems[1]?.canonicalAnswer.slice(0, 48) ||
+            "Partial answer";
+
+          const attemptResponse = await server.inject({
+            method: "POST",
+            url: "/v1/assessments/attempts",
+            payload: {
+              assessmentId: assessmentBody.assessment.id,
+              responses: [
+                {
+                  itemId: assessmentItems[0]?.id,
+                  answer: assessmentItems[0]?.canonicalAnswer
+                },
+                {
+                  itemId: assessmentItems[1]?.id,
+                  answer: partiallyCorrectAnswer
+                },
+                {
+                  itemId: assessmentItems[2]?.id,
+                  answer: "I am not sure yet."
+                }
+              ]
+            }
+          });
+
+          expect(attemptResponse.statusCode).toBe(201);
+          const attemptBody = attemptResponse.json();
+          assertNoRelayIds(attemptBody);
+          expect(attemptBody.evaluation).toBeDefined();
+          expect(attemptBody.knowledgeGaps.length).toBeGreaterThan(0);
+          expect(
+            attemptBody.knowledgeGaps.some(
+              (gap: { description?: string; evidence?: string; topic?: string }) =>
+                Boolean(gap.description && gap.description.length > 0) &&
+                Boolean(gap.evidence && gap.evidence.length > 0) &&
+                gap.topic === demo.topic
+            )
+          ).toBe(true);
+          expect(attemptBody.phase).toBe("loop-batching");
+          expect(attemptBody.nextAction.kind).toBe("start-loop-unit");
+          expect(attemptBody.masteryProfile).toBeUndefined();
+          expect(attemptBody.loopBatch).toEqual(
+            expect.objectContaining({
+              units: expect.any(Array)
+            })
+          );
+
+          const evaluationMessageCapture = findRelayMessageCapture(
+            relayCaptures,
+            "evaluateAssessmentAttempt"
+          );
+          expect(evaluationMessageCapture?.requestBody?.content).toMatchObject({
+            type: "command",
+            name: "runtime.evaluate_structured_response",
+            expectedOutputSchema: "AssessmentAttemptEvaluationCandidate"
+          });
+
+          const evaluationCommandInput = (
+            evaluationMessageCapture?.requestBody?.content as
+              | {
+                  input?: Record<string, unknown>;
+                }
+              | undefined
+          )?.input;
+          expect(evaluationCommandInput?.candidateKind).toBe(
+            "assessment_attempt_evaluation"
+          );
+          expect(evaluationCommandInput?.assessment).toMatchObject({
+            topic: demo.topic
+          });
+          expect(
+            Array.isArray(evaluationCommandInput?.assessment?.items) &&
+              evaluationCommandInput.assessment.items.length === 3
+          ).toBe(true);
+          expect(
+            Array.isArray(evaluationCommandInput?.responses) &&
+              evaluationCommandInput.responses.length === 3
+          ).toBe(true);
+          expect(evaluationCommandInput?.materialInterpretation).toMatchObject({
+            mainTopic: source?.acceptedInterpretation?.mainTopic,
+            detectedSubject: source?.acceptedInterpretation?.detectedSubject,
+            detectedYearGroup: source?.acceptedInterpretation?.detectedYearGroup
+          });
+          expect(
+            Array.isArray(evaluationCommandInput?.materialInterpretation?.learningObjectives) &&
+              evaluationCommandInput.materialInterpretation.learningObjectives.length > 0
+          ).toBe(true);
+          expect(
+            Array.isArray(evaluationCommandInput?.sourceEvidence) &&
+              evaluationCommandInput.sourceEvidence.length > 0
+          ).toBe(true);
+          expect(
+            Array.isArray(evaluationCommandInput?.markingRules) &&
+              evaluationCommandInput.markingRules.length > 0
+          ).toBe(true);
+          expect(
+            Array.isArray(evaluationCommandInput?.sourceEvidence) &&
+              evaluationCommandInput.sourceEvidence.every(
+                (item) =>
+                  typeof item === "object" &&
+                  item !== null &&
+                  typeof (item as { sourceRef?: unknown }).sourceRef === "string" &&
+                  acceptedSourceRefs.has((item as { sourceRef: string }).sourceRef)
+              )
+          ).toBe(true);
+          expect(
+            JSON.stringify(evaluationCommandInput ?? {})
+          ).not.toContain("canonicalAnswer");
+
+          const evaluationRelayResponseContent = findRelayResponseContent(
+            relayCaptures,
+            "evaluateAssessmentAttempt"
+          );
+          expect(evaluationRelayResponseContent).toBeDefined();
         } finally {
           await server.close();
         }

@@ -389,6 +389,105 @@ label {
   background: rgba(255, 255, 255, 0.68);
 }
 
+.assessment-game,
+.assessment-card,
+.assessment-options,
+.assessment-progress,
+.assessment-nav,
+.assessment-dots {
+  display: grid;
+  gap: 1rem;
+}
+
+.assessment-progress {
+  grid-template-columns: 1fr auto;
+  align-items: center;
+}
+
+.assessment-track {
+  height: 0.7rem;
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(33, 55, 43, 0.1);
+}
+
+.assessment-track-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #d99f39 0%, #21372b 100%);
+}
+
+.assessment-card,
+.assessment-hint,
+.assessment-feedback {
+  padding: 1rem;
+  border-radius: 1.35rem;
+  background: rgba(255, 255, 255, 0.75);
+}
+
+.assessment-options {
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+}
+
+.option-card {
+  padding: 1rem;
+  border-radius: 1rem;
+  border: 1px solid rgba(23, 32, 21, 0.12);
+  background: rgba(255, 252, 245, 0.92);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.option-card[data-option-selected="true"] {
+  border-color: rgba(33, 55, 43, 0.42);
+  background: rgba(33, 55, 43, 0.12);
+}
+
+.assessment-utility-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.assessment-feedback[data-feedback-tone="correct"] {
+  background: rgba(221, 243, 220, 0.92);
+}
+
+.assessment-feedback[data-feedback-tone="needs_work"] {
+  background: rgba(255, 239, 206, 0.88);
+}
+
+.assessment-nav {
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+}
+
+.assessment-dots {
+  grid-auto-flow: column;
+  justify-content: center;
+}
+
+.assessment-dot {
+  width: 0.95rem;
+  height: 0.95rem;
+  border-radius: 999px;
+  background: rgba(33, 55, 43, 0.18);
+  cursor: pointer;
+}
+
+.assessment-dot[data-dot-state="current"] {
+  background: #21372b;
+}
+
+.assessment-dot[data-dot-state="done"] {
+  background: #5e8b62;
+}
+
+.assessment-dot[data-dot-state="started"] {
+  background: #d99f39;
+}
+
 .score-banner strong,
 .next-loop-time {
   font-family: "Fraunces", "Iowan Old Style", Georgia, serif;

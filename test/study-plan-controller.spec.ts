@@ -5,6 +5,11 @@ import { InitialAssessmentController } from "../src/modules/assessment/InitialAs
 import { AssessmentAttemptController } from "../src/modules/assessment/AssessmentAttemptController.js";
 import { MasterDataUploadController } from "../src/modules/assessment/MasterDataUploadController.js";
 import { studyDays } from "../src/domain/study/StudySchedule.js";
+import { ok } from "../src/domain/primitives/result.js";
+import { LearningLoop } from "../src/domain/learning/LearningLoop.js";
+import { createDomainEventRecorder } from "../src/domain/primitives/Event.js";
+import { createUploadItemsFromInterpretation } from "../src/modules/masterData/MasterDataInterpretation.js";
+import { LearnerWorkspaceKey } from "../src/modules/planning/LearnerWorkspaceKey.js";
 
 describe("StudyPlanController", () => {
   it("requires an existing diagnosed learning loop before adapting a study plan", async () => {
@@ -133,5 +138,299 @@ describe("StudyPlanController", () => {
       artifactId: result.value.artifact.id,
       diagnosedGapCount: 1
     });
+  });
+
+  it("returns a validation error when runtime study-plan output is missing artifact content", async () => {
+    const repository = new SqliteLearningLoopRepository(":memory:");
+    const uploadController = new MasterDataUploadController(repository);
+    const assessmentController = new InitialAssessmentController(repository);
+    const attemptController = new AssessmentAttemptController(repository);
+    const controller = new StudyPlanController(
+      repository,
+      undefined,
+      undefined,
+      {
+        evaluateActiveReviewSession: () => {
+          throw new Error("not used");
+        },
+        evaluateAssessmentAttempt: () => {
+          throw new Error("not used");
+        },
+        generateInitialAssessment: () => {
+          throw new Error("not used");
+        },
+        generatePracticeActivity: () => {
+          throw new Error("not used");
+        },
+        interpretMasterData: () => {
+          throw new Error("not used");
+        },
+        generateStudyPlan: async () =>
+          ok({
+            assumptions: [],
+            childTaskSummaries: [],
+            decisions: [],
+            runtimeTrace: {
+              provider: "relay",
+              operation: "generateStudyPlan",
+              runtimeArtifacts: []
+            }
+          } as never)
+      }
+    );
+
+    await uploadController.execute({
+      sourceName: "Year 7 Fractions Bank",
+      items: [
+        {
+          topic: "fractions",
+          prompt: "Simplify 6/8.",
+          canonicalAnswer: "three quarters",
+          visibleMaterial: "Fractions can describe equal parts of a whole."
+        }
+      ]
+    });
+
+    const assessment = await assessmentController.execute({
+      learnerName: "Year 7 learner",
+      yearGroup: "Year 7",
+      topic: "fractions",
+      questionCount: 1
+    });
+    expect(assessment.ok).toBe(true);
+    if (!assessment.ok) {
+      return;
+    }
+
+    const attempt = await attemptController.execute({
+      assessmentId: assessment.value.assessment.id,
+      responses: assessment.value.assessment.items.map((item) => ({
+        itemId: item.id,
+        answer: "incorrect response"
+      }))
+    });
+    expect(attempt.ok).toBe(true);
+    if (!attempt.ok) {
+      return;
+    }
+
+    const result = await controller.execute({
+      learnerName: "Year 7 learner",
+      yearGroup: "Year 7",
+      objective: "Build a weekly plan for fractions.",
+      focusTopics: ["fractions"],
+      availableMinutesByDay: Object.fromEntries(
+        studyDays.map((day) => [day, day === "Saturday" ? 60 : 30])
+      ) as Record<(typeof studyDays)[number], number>
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      return;
+    }
+
+    expect(result.error.code).toBe("VALIDATION_ERROR");
+    expect(result.error.message).toContain("missing or malformed");
+  });
+
+  it("uses the most recent matching learning loop and its accepted interpretation", async () => {
+    const repository = new SqliteLearningLoopRepository(":memory:");
+    const assessmentController = new InitialAssessmentController(repository);
+
+    const olderInterpretation = {
+      schema: "MasterDataInterpretationCandidate.v1" as const,
+      detectedSubject: "Geography",
+      detectedYearGroup: "Year 7",
+      mainTopic: "Coasts",
+      subtopics: ["Coastal processes"],
+      keyPeople: [],
+      keyTerms: ["erosion"],
+      importantDates: [],
+      processes: ["erosion"],
+      learnerFacingMaterialSummary: "Older Coasts summary from a previous learning loop.",
+      learningObjectives: [
+        {
+          id: "objective_coasts_older",
+          objective: "Explain how erosion shapes coasts.",
+          sourceRefs: ["older_source"]
+        }
+      ],
+      sourceMap: [
+        {
+          sourceRef: "older_source",
+          excerpt: "Erosion shapes coastal landforms over time."
+        }
+      ],
+      items: [
+        {
+          subject: "Geography",
+          yearGroup: "Year 7",
+          topic: "Coasts",
+          subtopic: "Coastal processes",
+          itemType: "fact" as const,
+          content: "Erosion shapes coastal landforms over time.",
+          sourceRef: "older_source"
+        }
+      ]
+    };
+    const latestInterpretation = {
+      ...olderInterpretation,
+      learnerFacingMaterialSummary: "Latest Coasts summary for the current learning loop.",
+      learningObjectives: [
+        {
+          id: "objective_coasts_latest",
+          objective: "Explain how erosion, transport, and deposition shape coasts.",
+          sourceRefs: ["latest_source"]
+        }
+      ],
+      sourceMap: [
+        {
+          sourceRef: "latest_source",
+          excerpt: "Erosion, transport, and deposition shape coastal landforms."
+        }
+      ],
+      items: [
+        {
+          subject: "Geography",
+          yearGroup: "Year 7",
+          topic: "Coasts",
+          subtopic: "Coastal processes",
+          itemType: "fact" as const,
+          content: "Erosion, transport, and deposition shape coastal landforms.",
+          sourceRef: "latest_source"
+        }
+      ]
+    };
+
+    const olderUpload = repository.registerMasterData({
+      sourceName: "Coasts Older",
+      rawSourceContent: "Coasts are shaped by erosion.",
+      contentType: "text/plain",
+      acceptedInterpretation: olderInterpretation,
+      learnerYearGroup: "Year 7",
+      userHints: {
+        subject: "Geography",
+        topic: "Coasts"
+      },
+      items: createUploadItemsFromInterpretation(olderInterpretation)
+    });
+
+    const latestUpload = repository.registerMasterData({
+      sourceName: "Coasts Latest",
+      rawSourceContent: "Coasts change through erosion, transport, and deposition.",
+      contentType: "text/plain",
+      acceptedInterpretation: latestInterpretation,
+      learnerYearGroup: "Year 7",
+      userHints: {
+        subject: "Geography",
+        topic: "Coasts"
+      },
+      items: createUploadItemsFromInterpretation(latestInterpretation)
+    });
+
+    const assessment = await assessmentController.execute({
+      learnerName: "Year 7 learner",
+      yearGroup: "Year 7",
+      topic: "Coasts",
+      questionCount: 1
+    });
+    expect(assessment.ok).toBe(true);
+    if (!assessment.ok) {
+      return;
+    }
+
+    const repositoryKey = LearnerWorkspaceKey.fromLearner("Year 7 learner", "Year 7");
+    const existingRecord = repository.findRecord(repositoryKey);
+    expect(existingRecord).toBeDefined();
+    if (!existingRecord) {
+      return;
+    }
+
+    const latestLoopEvents = createDomainEventRecorder(existingRecord.workspace.id);
+    const latestLoop = LearningLoop.create(
+      {
+        workspaceId: existingRecord.workspace.id,
+        objective: "Refresh the latest Coasts understanding.",
+        topic: "Coasts",
+        sourceIds: [latestUpload.source.id]
+      },
+      latestLoopEvents
+    );
+
+    repository.saveRecord(repositoryKey, {
+      ...existingRecord,
+      events: [...existingRecord.events, ...latestLoopEvents.all()],
+      learningLoops: [...existingRecord.learningLoops, latestLoop]
+    });
+
+    let capturedInput:
+      | Parameters<NonNullable<ConstructorParameters<typeof StudyPlanController>[3]>["generateStudyPlan"]>[0]
+      | undefined;
+    const controller = new StudyPlanController(
+      repository,
+      undefined,
+      undefined,
+      {
+        evaluateActiveReviewSession: () => {
+          throw new Error("not used");
+        },
+        evaluateAssessmentAttempt: () => {
+          throw new Error("not used");
+        },
+        generateInitialAssessment: () => {
+          throw new Error("not used");
+        },
+        generatePracticeActivity: () => {
+          throw new Error("not used");
+        },
+        interpretMasterData: () => {
+          throw new Error("not used");
+        },
+        generateStudyPlan: async (input) => {
+          capturedInput = input;
+          return ok({
+            assumptions: [],
+            childTaskSummaries: ["Prepare a focused Coasts study block with retrieval and self-check."],
+            decisions: [],
+            artifactContent: {
+              summary: "Merry Penguin will follow a one-week plan focused on Coasts.",
+              sessions: [
+                {
+                  day: "Monday",
+                  minutes: 30,
+                  topic: "Coasts",
+                  activity: "Review erosion, transport, and deposition.",
+                  outcome: "Explain one coastal process clearly."
+                }
+              ],
+              checkpoints: ["Midweek check: explain one coastal process without notes."],
+              notes: ["Keep the source summary beside the learner during the session."]
+            }
+          });
+        }
+      }
+    );
+
+    const result = await controller.execute({
+      learnerName: "Year 7 learner",
+      yearGroup: "Year 7",
+      objective: "Build secure understanding in Coasts.",
+      focusTopics: ["Coasts"],
+      availableMinutesByDay: Object.fromEntries(
+        studyDays.map((day) => [day, day === "Saturday" ? 60 : 30])
+      ) as Record<(typeof studyDays)[number], number>
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      return;
+    }
+
+    expect(result.value.learningLoop.id).toBe(latestLoop.id);
+    expect(capturedInput?.learningLoopId).toBe(latestLoop.id);
+    expect(capturedInput?.materialInterpretations).toHaveLength(1);
+    expect(capturedInput?.materialInterpretations?.[0]?.learnerFacingMaterialSummary).toBe(
+      "Latest Coasts summary for the current learning loop."
+    );
   });
 });

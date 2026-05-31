@@ -75,6 +75,7 @@ export class WorkspaceAssessmentAssembler {
         masteryProfiles: [...(existingRecord?.masteryProfiles ?? [])],
         practiceActivities: [...(existingRecord?.practiceActivities ?? [])],
         activeReviewSessions: [...(existingRecord?.activeReviewSessions ?? [])],
+        loopBatches: [...(existingRecord?.loopBatches ?? [])],
         runtimeConversationBindings: upsertRuntimeConversationBinding(
           existingRecord?.runtimeConversationBindings ?? [],
           input.runtimeConversationBinding

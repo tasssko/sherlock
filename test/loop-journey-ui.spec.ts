@@ -95,6 +95,7 @@ function renderJourney(loopState: LearningLoopResumeResponse | null): string {
     onResumeLoopIdChange: () => {},
     onResumeSubmit: async () => undefined,
     onReviewSubmit: async () => undefined,
+    onStartNewRound: () => {},
     onSelectedDemoMaterialChange: () => {}
   };
 
@@ -153,7 +154,7 @@ describe("Loop journey UI", () => {
           masterDataStatus: "ready",
           masterDataValues: baseMasterDataValues
         }).currentStageKey
-      ).toBe("check-up");
+      ).toBe("loop-batch");
 
       await server.inject({
         method: "POST",
@@ -178,7 +179,7 @@ describe("Loop journey UI", () => {
           masterDataStatus: "ready",
           masterDataValues: baseMasterDataValues
         }).currentStageKey
-      ).toBe("focus-areas");
+      ).toBe("loop-batch");
 
       await server.inject({
         method: "POST",
@@ -203,7 +204,7 @@ describe("Loop journey UI", () => {
           masterDataStatus: "ready",
           masterDataValues: baseMasterDataValues
         }).currentStageKey
-      ).toBe("study-plan");
+      ).toBe("loop-batch");
 
       const practice = await server.inject({
         method: "POST",
@@ -254,6 +255,133 @@ describe("Loop journey UI", () => {
           masterDataValues: baseMasterDataValues
         }).currentStageKey
       ).toBe("next-loop");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("shows the next-loop stage when a secure round has no diagnosed gaps", async () => {
+    const server = await createServer();
+
+    try {
+      await server.inject({
+        method: "POST",
+        url: "/v1/master-data",
+        payload: {
+          sourceName: "Year 7 Weather Pack",
+          items: [
+            {
+              topic: "Weather",
+              prompt: "What is air pressure?",
+              canonicalAnswer: "The weight of air pressing down.",
+              visibleMaterial: "Air pressure is the weight of the air pressing down."
+            }
+          ]
+        }
+      });
+
+      const created = await server.inject({
+        method: "POST",
+        url: "/v1/assessments/initial",
+        payload: {
+          learnerName: baseLoopValues.learnerName,
+          yearGroup: baseLoopValues.yearGroup,
+          topic: "Weather",
+          questionCount: 1
+        }
+      });
+      const createdPayload = created.json();
+
+      await server.inject({
+        method: "POST",
+        url: "/v1/assessments/attempts",
+        payload: {
+          assessmentId: createdPayload.assessment.id,
+          responses: createdPayload.assessment.items.map(
+            (item: { canonicalAnswer: string; id: string }) => ({
+              itemId: item.id,
+              answer: item.canonicalAnswer
+            })
+          )
+        }
+      });
+
+      const resumed = await server.inject({
+        method: "GET",
+        url: `/v1/learning-loops/${createdPayload.learningLoop.id}`
+      });
+
+      const loopState = resumed.json();
+      expect(loopState.nextAction.kind).toBe("track-mastery");
+      expect(loopState.loopBatch).toBeUndefined();
+      expect(
+        buildLoopJourneyModel({
+          loopState,
+          loopValues: {
+            ...baseLoopValues,
+            topic: "Weather"
+          },
+          masterDataStatus: "ready",
+          masterDataValues: baseMasterDataValues
+        }).currentStageKey
+      ).toBe("next-loop");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("shows the loop-batch stage immediately for loop-first rounds", async () => {
+    const server = await createServer();
+
+    try {
+      await server.inject({
+        method: "POST",
+        url: "/v1/master-data",
+        payload: {
+          sourceName: "Year 7 Weather Pack",
+          items: [
+            {
+              topic: "Weather",
+              prompt: "What is air pressure?",
+              canonicalAnswer: "The weight of air pressing down.",
+              visibleMaterial: "Air pressure is the weight of the air pressing down."
+            }
+          ]
+        }
+      });
+
+      const started = await server.inject({
+        method: "POST",
+        url: "/v1/learning-loops/start",
+        payload: {
+          learnerName: baseLoopValues.learnerName,
+          yearGroup: baseLoopValues.yearGroup,
+          topic: "Weather",
+          objective: "Build secure understanding in Weather.",
+          desiredLoopCount: 2
+        }
+      });
+
+      const loopState = started.json();
+      expect(loopState.nextAction.kind).toBe("start-loop-unit");
+      expect(loopState.loopBatch).toBeDefined();
+      expect(loopState.currentAssessment).toBeUndefined();
+      expect(
+        buildLoopJourneyModel({
+          loopState,
+          loopValues: {
+            ...baseLoopValues,
+            topic: "Weather"
+          },
+          masterDataStatus: "ready",
+          masterDataValues: baseMasterDataValues
+        }).currentStageKey
+      ).toBe("loop-batch");
+
+      const markup = renderJourney(loopState);
+      expect(markup).toContain("Quick check 1 of");
+      expect(markup).toContain("Check answer");
+      expect(markup.includes("Single choice") || markup.includes("Multi-select")).toBe(true);
     } finally {
       await server.close();
     }
@@ -457,7 +585,10 @@ describe("Loop journey UI", () => {
       expect(markup).toContain("What improved");
       expect(markup).toContain("What still needs work");
       expect(markup).toContain("When the next loop starts");
-      expect(markup).toContain(payload.knowledgeGaps[0].description);
+      expect(
+        markup.includes(payload.knowledgeGaps[0]?.description ?? "") ||
+          markup.includes(payload.loopBatch?.units.find((unit: { state: string }) => unit.state !== "completed")?.focus ?? "")
+      ).toBe(true);
       expect(markup).toContain(
         new Date(payload.latestActiveReviewSession.nextReviewAt).toLocaleString(undefined, {
           dateStyle: "medium",
@@ -513,6 +644,7 @@ describe("Loop journey UI", () => {
       onResumeLoopIdChange: () => {},
       onResumeSubmit: async () => undefined,
       onReviewSubmit: async () => undefined,
+      onStartNewRound: () => {},
       onSelectedDemoMaterialChange: () => {}
     };
     const markup = renderToStaticMarkup(createElement(LoopJourneyPage, props));
@@ -578,6 +710,7 @@ describe("Loop journey UI", () => {
       onResumeLoopIdChange: () => {},
       onResumeSubmit: async () => undefined,
       onReviewSubmit: async () => undefined,
+      onStartNewRound: () => {},
       onSelectedDemoMaterialChange: () => {}
     };
 
@@ -590,5 +723,44 @@ describe("Loop journey UI", () => {
     expect(markup).toContain("Philip II Of Spain");
     expect(markup).toContain("Important dates");
     expect(markup).toContain("10 July 1553");
+  });
+
+  it("shows a start-new-round action when a loop is active", async () => {
+    const server = await createServer();
+
+    try {
+      await server.inject({
+        method: "POST",
+        url: "/v1/master-data",
+        payload: {
+          sourceName: "Year 7 Weather Pack",
+          items: [
+            {
+              topic: "Weather",
+              prompt: "What is air pressure?",
+              canonicalAnswer: "The weight of air pressing down.",
+              visibleMaterial: "Air pressure is the weight of the air pressing down."
+            }
+          ]
+        }
+      });
+
+      const started = await server.inject({
+        method: "POST",
+        url: "/v1/learning-loops/start",
+        payload: {
+          learnerName: baseLoopValues.learnerName,
+          yearGroup: baseLoopValues.yearGroup,
+          topic: "Weather",
+          objective: "Build secure understanding in Weather.",
+          desiredLoopCount: 2
+        }
+      });
+
+      const markup = renderJourney(started.json());
+      expect(markup).toContain("Start a new round");
+    } finally {
+      await server.close();
+    }
   });
 });

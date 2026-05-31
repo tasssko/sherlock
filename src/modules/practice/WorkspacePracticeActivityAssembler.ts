@@ -60,6 +60,7 @@ export class WorkspacePracticeActivityAssembler {
         masteryProfiles: [...input.record.masteryProfiles],
         practiceActivities: [...input.record.practiceActivities, input.practiceActivity],
         activeReviewSessions: [...input.record.activeReviewSessions],
+        loopBatches: [...input.record.loopBatches],
         runtimeConversationBindings: upsertRuntimeConversationBinding(
           input.record.runtimeConversationBindings,
           input.runtimeConversationBinding

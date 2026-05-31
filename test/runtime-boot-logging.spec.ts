@@ -7,6 +7,8 @@ import {
 import { RelayWorkspaceBinding } from "../src/modules/runtime/RelayWorkspaceBinding.js";
 
 const originalRuntimeMode = process.env.LOOP_STUDY_AGENT_RUNTIME;
+const originalIntelligenceMode = process.env.LOOP_STUDY_INTELLIGENCE;
+const originalOpenAiKey = process.env.OPENAI_API_KEY;
 const originalRelayApiUrl = process.env.LOOP_STUDY_RELAY_API_URL;
 
 function createRelayBinding(): RelayWorkspaceBinding {
@@ -36,10 +38,22 @@ function createRelayBinding(): RelayWorkspaceBinding {
 }
 
 afterEach(() => {
+  if (originalIntelligenceMode === undefined) {
+    delete process.env.LOOP_STUDY_INTELLIGENCE;
+  } else {
+    process.env.LOOP_STUDY_INTELLIGENCE = originalIntelligenceMode;
+  }
+
   if (originalRuntimeMode === undefined) {
     delete process.env.LOOP_STUDY_AGENT_RUNTIME;
   } else {
     process.env.LOOP_STUDY_AGENT_RUNTIME = originalRuntimeMode;
+  }
+
+  if (originalOpenAiKey === undefined) {
+    delete process.env.OPENAI_API_KEY;
+  } else {
+    process.env.OPENAI_API_KEY = originalOpenAiKey;
   }
 
   if (originalRelayApiUrl === undefined) {
@@ -52,6 +66,7 @@ afterEach(() => {
 
 describe("Runtime boot logging", () => {
   it("logs FixtureAgentRuntime startup in fixture mode", async () => {
+    delete process.env.LOOP_STUDY_INTELLIGENCE;
     delete process.env.LOOP_STUDY_AGENT_RUNTIME;
     const messages: { bindings: Record<string, unknown>; message: string }[] = [];
     const runtimeBootLogger: RuntimeBootLogger = {
@@ -78,8 +93,36 @@ describe("Runtime boot logging", () => {
     }
   });
 
+  it("logs OpenAIStudyIntelligence startup in openai mode", async () => {
+    process.env.LOOP_STUDY_INTELLIGENCE = "openai";
+    process.env.OPENAI_API_KEY = "test-key";
+    const messages: { bindings: Record<string, unknown>; message: string }[] = [];
+    const runtimeBootLogger: RuntimeBootLogger = {
+      info(bindings, message) {
+        messages.push({ bindings, message });
+      }
+    };
+
+    const server = await createServer({
+      runtimeBootLogger
+    });
+
+    try {
+      expect(messages).toEqual([
+        {
+          bindings: {
+            runtimeMode: "openai"
+          },
+          message: "loop.study booted with OpenAIStudyIntelligence."
+        }
+      ]);
+    } finally {
+      await server.close();
+    }
+  });
+
   it("logs RelayAgentRuntime startup with the provisioned binding in relay mode", async () => {
-    process.env.LOOP_STUDY_AGENT_RUNTIME = "relay";
+    process.env.LOOP_STUDY_INTELLIGENCE = "relay";
     process.env.LOOP_STUDY_RELAY_API_URL = "http://relay.test";
     const messages: { bindings: Record<string, unknown>; message: string }[] = [];
     const runtimeBootLogger: RuntimeBootLogger = {

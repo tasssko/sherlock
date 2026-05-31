@@ -64,8 +64,10 @@ interface RelayCommandContent {
 }
 
 interface RelayApiErrorPayload {
+  code?: string;
   error?: string;
   message?: string;
+  schema?: string;
 }
 
 export interface LoopStudyRelayConversationAdapterOptions {
@@ -156,22 +158,24 @@ export class LoopStudyRelayConversationAdapter {
     let relayTaskId = response.value.taskId;
     let relayWorkPlanId = response.value.workPlanId;
 
-    if (
-      (!responseContent && !responseText) ||
-      !response.value.responseMessageId ||
-      !relayTaskId ||
-      artifactIds.length === 0
-    ) {
+    const inspectionRequired = !responseContent && !responseText;
+    const inspectionHelpful =
+      !inspectionRequired &&
+      (!response.value.responseMessageId || !relayTaskId || artifactIds.length === 0);
+
+    if (inspectionRequired || inspectionHelpful) {
       const inspection = await this.fetchInspectionResponse(response.value.messageId);
       if (!inspection.ok) {
-        return inspection;
+        if (inspectionRequired) {
+          return inspection;
+        }
+      } else {
+        responseContent = responseContent ?? inspection.value.responseContent;
+        responseText = responseText ?? inspection.value.responseText;
+        artifactIds = inspection.value.artifactIds;
+        relayTaskId = relayTaskId ?? inspection.value.taskId;
+        relayWorkPlanId = relayWorkPlanId ?? inspection.value.workPlanId;
       }
-
-      responseContent = responseContent ?? inspection.value.responseContent;
-      responseText = responseText ?? inspection.value.responseText;
-      artifactIds = inspection.value.artifactIds;
-      relayTaskId = relayTaskId ?? inspection.value.taskId;
-      relayWorkPlanId = relayWorkPlanId ?? inspection.value.workPlanId;
     }
 
     if (!responseContent && !responseText) {
@@ -265,7 +269,7 @@ export class LoopStudyRelayConversationAdapter {
 
     if (!response.ok) {
       const payload = await readRelayErrorPayload(response);
-      const detail = payload.message ?? payload.error ?? `status ${response.status}`;
+      const detail = formatRelayApiErrorPayload(response.status, payload);
 
       return err({
         code: "STATE_CONFLICT",
@@ -313,4 +317,29 @@ async function readRelayErrorPayload(response: Response): Promise<RelayApiErrorP
   } catch {
     return {};
   }
+}
+
+function formatRelayApiErrorPayload(
+  status: number,
+  payload: RelayApiErrorPayload
+): string {
+  if (
+    payload.schema === "RelayCommandError.v1" ||
+    payload.code === "COMMAND_NOT_REGISTERED" ||
+    payload.code === "COMMAND_NOT_ALLOWED" ||
+    payload.code === "NO_CAPABLE_ROUTE"
+  ) {
+    switch (payload.code) {
+      case "COMMAND_NOT_REGISTERED":
+        return "The required structured runtime command is not registered right now.";
+      case "COMMAND_NOT_ALLOWED":
+        return "The required structured runtime command is not allowed right now.";
+      case "NO_CAPABLE_ROUTE":
+        return "The required structured runtime command does not currently have an available route.";
+      default:
+        return payload.message ?? payload.error ?? `status ${status}`;
+    }
+  }
+
+  return payload.message ?? payload.error ?? `status ${status}`;
 }

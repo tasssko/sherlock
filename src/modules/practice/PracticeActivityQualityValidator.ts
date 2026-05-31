@@ -29,9 +29,35 @@ function tokenSignature(value: string): string {
     .join(" ");
 }
 
+function isGenericRecallPrompt(value: string): boolean {
+  const normalized = normalize(value);
+  return (
+    normalized.startsWith("what should you remember about ") ||
+    normalized.startsWith("review ") ||
+    normalized.startsWith("revise ") ||
+    normalized === "what should you remember"
+  );
+}
+
 export class PracticeActivityQualityValidator {
   validate(cards: readonly Flashcard[]): Result<readonly Flashcard[]> {
     for (const card of cards) {
+      if (
+        !card ||
+        typeof card.id !== "string" ||
+        typeof card.front !== "string" ||
+        typeof card.back !== "string" ||
+        typeof card.topic !== "string" ||
+        typeof card.learningObjective !== "string" ||
+        typeof card.sourceMasterDataItemId !== "string" ||
+        typeof card.sourceVisibleSentence !== "string"
+      ) {
+        return err({
+          code: "VALIDATION_ERROR",
+          message: "Practice activity candidate included a malformed flashcard."
+        });
+      }
+
       const normalizedFront = normalize(card.front);
       const normalizedBack = normalize(card.back);
       const normalizedSourceSentence = normalize(card.sourceVisibleSentence);
@@ -54,6 +80,13 @@ export class PracticeActivityQualityValidator {
         return err({
           code: "VALIDATION_ERROR",
           message: `Flashcard ${card.id} uses materially equivalent prompt and answer text.`
+        });
+      }
+
+      if (isGenericRecallPrompt(card.front)) {
+        return err({
+          code: "VALIDATION_ERROR",
+          message: `Flashcard ${card.id} uses a vague front and must ask for a specific retrieval.`
         });
       }
 

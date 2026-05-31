@@ -10,10 +10,10 @@ import {
 import { parseMasterDataInput } from "../../modules/masterData/structuredRevision.js";
 import {
   completePracticeActivity,
-  generateInitialAssessment,
   generatePracticeActivity,
   generateStudyPlan,
   getLearningLoop,
+  startLearningLoop,
   submitAssessmentAttempt,
   uploadMasterData
 } from "./api/loopStudyClient.js";
@@ -72,8 +72,8 @@ function buildInitialLoopValues(): LoopSetupValues {
     yearGroup: defaultDemoDocument?.yearGroup ?? "Year 7",
     topic: defaultDemoDocument?.topic ?? "Mary I",
     objective: buildLoopObjective(defaultDemoDocument?.topic ?? "Mary I"),
-    questionCount: 5,
-    practiceCardCount: 5,
+    questionCount: 8,
+    practiceCardCount: 8,
     availableMinutesByDay: initialMinutes
   };
 }
@@ -229,6 +229,21 @@ export function App() {
     void loadLearningLoop(loopId);
   }, []);
 
+  function resetActiveLoop() {
+    setLoopState(null);
+    setResumeLoopId("");
+    setResumeError(null);
+    setAssessmentError(null);
+    setAttemptError(null);
+    setStudyPlanError(null);
+    setPracticeError(null);
+    setCompletionError(null);
+    window.localStorage.removeItem(lastLoopStorageKey);
+    const url = new URL(window.location.href);
+    url.searchParams.delete("loop");
+    window.history.replaceState({}, "", url);
+  }
+
   async function handleResumeSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!resumeLoopId.trim()) {
@@ -278,11 +293,12 @@ export function App() {
     setAssessmentError(null);
 
     try {
-      const response = await generateInitialAssessment(apiBaseUrl, {
+      const response = await startLearningLoop(apiBaseUrl, {
         learnerName: loopValues.learnerName,
         yearGroup: loopValues.yearGroup,
         topic: loopValues.topic,
-        questionCount: loopValues.questionCount
+        objective: loopValues.objective,
+        desiredLoopCount: Math.max(1, Math.min(loopValues.questionCount, 6))
       });
       await loadLearningLoop(response.learningLoopId);
     } catch (requestError) {
@@ -499,6 +515,7 @@ export function App() {
       onResumeLoopIdChange={setResumeLoopId}
       onResumeSubmit={handleResumeSubmit}
       onReviewSubmit={handlePracticeCompletionSubmit}
+      onStartNewRound={resetActiveLoop}
       onSelectedDemoMaterialChange={(id) => {
         setUploadedMasterDataSummary(null);
         setSelectedDemoMaterialId(id);

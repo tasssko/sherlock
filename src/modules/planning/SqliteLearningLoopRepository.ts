@@ -3,6 +3,7 @@ import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { ActiveReviewSession } from "../../domain/learning/ActiveReviewSession.js";
 import { Assessment, Attempt, Evaluation } from "../../domain/learning/Assessment.js";
+import { LearningLoopBatch } from "../../domain/learning/LearningLoopBatch.js";
 import {
   KnowledgeGap,
   LearningLoop,
@@ -129,6 +130,12 @@ export class SqliteLearningLoopRepository implements LearningLoopRepository {
       .map((row) =>
         ActiveReviewSession.rehydrate(parseSnapshot((row as { snapshot: string }).snapshot))
       );
+    const loopBatches = this.database
+      .prepare("select snapshot from loop_batches where learner_key = ? order by rowid asc")
+      .all(key.value)
+      .map((row) =>
+        LearningLoopBatch.rehydrate(parseSnapshot((row as { snapshot: string }).snapshot))
+      );
     const runtimeTraces = this.database
       .prepare("select snapshot from runtime_traces where learner_key = ? order by rowid asc")
       .all(key.value)
@@ -158,6 +165,7 @@ export class SqliteLearningLoopRepository implements LearningLoopRepository {
       masteryProfiles,
       practiceActivities,
       activeReviewSessions,
+      loopBatches,
       runtimeConversationBindings,
       runtimeTraces
     });
@@ -238,6 +246,53 @@ export class SqliteLearningLoopRepository implements LearningLoopRepository {
     }
 
     return [...bySource.values()];
+  }
+
+  findMasterDataBySourceIds(
+    sourceIds: readonly string[]
+  ): { source: MasterDataSource; items: readonly MasterDataItem[] }[] {
+    if (sourceIds.length === 0) {
+      return [];
+    }
+
+    const lookup = this.database.prepare(
+      `select source_snapshot, item_snapshot
+       from master_data_items
+       where source_id = ?
+       order by rowid asc`
+    );
+
+    return sourceIds.flatMap((sourceId) => {
+      const rows = lookup.all(sourceId) as {
+        source_snapshot: string;
+        item_snapshot: string;
+      }[];
+
+      if (rows.length === 0) {
+        const source = this.findMasterDataSourcesByIds([sourceId])[0];
+        return source
+          ? [
+              {
+                source,
+                items: []
+              }
+            ]
+          : [];
+      }
+
+      const firstRow = rows[0];
+      if (!firstRow) {
+        return [];
+      }
+
+      const source = MasterDataSource.rehydrate(parseSnapshot(firstRow.source_snapshot));
+      return [
+        {
+          source,
+          items: rows.map((row) => MasterDataItem.rehydrate(parseSnapshot(row.item_snapshot)))
+        }
+      ];
+    });
   }
 
   findMasterDataSourcesByIds(sourceIds: readonly string[]): readonly MasterDataSource[] {
@@ -323,6 +378,7 @@ export class SqliteLearningLoopRepository implements LearningLoopRepository {
       this.database.prepare("delete from mastery_profiles where learner_key = ?").run(key.value);
       this.database.prepare("delete from practice_activities where learner_key = ?").run(key.value);
       this.database.prepare("delete from active_review_sessions where learner_key = ?").run(key.value);
+      this.database.prepare("delete from loop_batches where learner_key = ?").run(key.value);
       this.database
         .prepare("delete from runtime_conversation_bindings where learner_key = ?")
         .run(key.value);
@@ -434,6 +490,20 @@ export class SqliteLearningLoopRepository implements LearningLoopRepository {
         );
       }
 
+      const insertLoopBatch = this.database.prepare(
+        `insert into loop_batches (id, learner_key, learning_loop_id, snapshot)
+         values (?, ?, ?, ?)`
+      );
+      for (const loopBatch of record.loopBatches) {
+        const snapshot = loopBatch.toSnapshot();
+        insertLoopBatch.run(
+          snapshot.id,
+          key.value,
+          snapshot.learningLoopId,
+          JSON.stringify(snapshot)
+        );
+      }
+
       const insertRuntimeTrace = this.database.prepare(
         "insert into runtime_traces (id, learner_key, snapshot) values (?, ?, ?)"
       );
@@ -530,6 +600,12 @@ export class SqliteLearningLoopRepository implements LearningLoopRepository {
         id text primary key,
         learner_key text not null,
         practice_activity_id text not null,
+        learning_loop_id text not null,
+        snapshot text not null
+      );
+      create table if not exists loop_batches (
+        id text primary key,
+        learner_key text not null,
         learning_loop_id text not null,
         snapshot text not null
       );

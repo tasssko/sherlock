@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import type { AssessmentItem } from "../../../domain/learning/Assessment.js";
 import type { LearningLoopResumeResponse } from "../../../domain/study/LearningLoops.js";
 import type { PracticeActivitySnapshot, ReviewConfidence } from "../../../domain/learning/PracticeActivity.js";
+import type { LearningLoopUnitQuickCheckSnapshot } from "../../../domain/study/LoopBatches.js";
 import type { StudyDay } from "../../../domain/study/StudySchedule.js";
 import { studyDays } from "../../../domain/study/StudySchedule.js";
 import type { ParsedMasterDataSummary } from "../../../modules/masterData/structuredRevision.js";
@@ -10,9 +12,8 @@ type JourneyStageKey =
   | "material-intake"
   | "material-summary"
   | "learner-focus"
-  | "check-up"
   | "focus-areas"
-  | "study-plan"
+  | "loop-batch"
   | "active-review"
   | "progress-update"
   | "next-loop";
@@ -38,6 +39,17 @@ interface CoachThreadMessage {
   role: "action" | "coach" | "learner";
   title: string;
 }
+
+interface AssessmentDraftAnswer {
+  answerText: string;
+  checked: boolean;
+  hintShown: boolean;
+  selectedOptionIds: string[];
+}
+
+interface LoopQuickCheckDraft extends AssessmentDraftAnswer {}
+
+type LoopPace = "quick" | "standard" | "deep";
 
 export interface LoopJourneyPageProps {
   assessmentError: string | null;
@@ -100,6 +112,7 @@ export interface LoopJourneyPageProps {
       responseText: string;
     }[]
   ) => Promise<void>;
+  onStartNewRound: () => void;
   onSelectedDemoMaterialChange: (id: string) => void;
 }
 
@@ -107,9 +120,8 @@ const stageOrder: readonly JourneyStageKey[] = [
   "material-intake",
   "material-summary",
   "learner-focus",
-  "check-up",
   "focus-areas",
-  "study-plan",
+  "loop-batch",
   "active-review",
   "progress-update",
   "next-loop"
@@ -135,6 +147,29 @@ function materialLineCount(lines: string): number {
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean).length;
+}
+
+function deriveLoopPace(questionCount: number): LoopPace {
+  if (questionCount <= 2) {
+    return "quick";
+  }
+
+  if (questionCount <= 4) {
+    return "standard";
+  }
+
+  return "deep";
+}
+
+function loopCountForPace(pace: LoopPace): number {
+  switch (pace) {
+    case "quick":
+      return 2;
+    case "standard":
+      return 4;
+    case "deep":
+      return 6;
+  }
 }
 
 function previewPrompts(lines: string): readonly string[] {
@@ -195,6 +230,13 @@ function currentPracticeReviewed(loopState: LearningLoopResumeResponse | null): 
   return lastReviewId === latestReview.id;
 }
 
+function currentLoopUnit(loopState: LearningLoopResumeResponse | null) {
+  return (
+    loopState?.loopBatch?.units.find((unit) => unit.state === "in_progress") ??
+    loopState?.loopBatch?.units.find((unit) => unit.state === "ready")
+  );
+}
+
 function buildCoachThread(input: {
   loopState: LearningLoopResumeResponse | null;
   loopValues: LoopJourneyPageProps["loopValues"];
@@ -205,6 +247,7 @@ function buildCoachThread(input: {
   const topic = loopState?.learningLoop.topic || loopValues.topic;
   const focusAreas = remainingFocusAreas(loopState);
   const reviewCount = loopState?.currentPracticeActivity?.flashcardSet.cards.length ?? 0;
+  const activeLoopUnit = currentLoopUnit(loopState);
 
   switch (stage.key) {
     case "material-intake":
@@ -241,19 +284,6 @@ function buildCoachThread(input: {
           body: loopValues.objective || `I want ${topic} to feel easier by the end of this round.`
         }
       ];
-    case "check-up":
-      return [
-        {
-          role: "coach",
-          title: "Coach",
-          body: "The first check-up should surface what is already secure and what still needs support."
-        },
-        {
-          role: "action",
-          title: "Next move",
-          body: stage.summary
-        }
-      ];
     case "focus-areas":
       return [
         {
@@ -265,17 +295,20 @@ function buildCoachThread(input: {
               : "The check-up did not surface any major gaps for this round."
         }
       ];
-    case "study-plan":
+    case "loop-batch":
       return [
         {
           role: "coach",
           title: "Coach",
-          body: "Turn the diagnosed gaps into a short, realistic plan you can actually follow."
+          body: "Turn the diagnosed gaps into short loops you can work through straight away."
         },
         {
           role: "action",
           title: "Next move",
-          body: stage.summary
+          body:
+            activeLoopUnit
+              ? `Start with ${activeLoopUnit.focus}. ${activeLoopUnit.learnerTask}`
+              : stage.summary
         }
       ];
     case "active-review":
@@ -325,14 +358,19 @@ export function buildLoopJourneyModel(input: {
   let currentStageKey: JourneyStageKey;
   if (!loopState) {
     currentStageKey = savedMaterial ? "learner-focus" : "material-intake";
-  } else if (!loopState.latestEvaluation) {
-    currentStageKey = "check-up";
-  } else if (!loopState.studyPlan) {
+  } else if (
+    loopState.nextAction.kind === "track-mastery" ||
+    loopState.learningLoop.phase === "mastery-tracking"
+  ) {
+    currentStageKey = "next-loop";
+  } else if (loopState.currentAssessment && !loopState.latestEvaluation) {
+    currentStageKey = "loop-batch";
+  } else if (reviewedCurrentPractice) {
+    currentStageKey = "next-loop";
+  } else if (loopState.loopBatch) {
+    currentStageKey = loopState.currentPracticeActivity ? "active-review" : "loop-batch";
+  } else if (loopState.latestEvaluation && !loopState.loopBatch) {
     currentStageKey = "focus-areas";
-  } else if (!loopState.currentPracticeActivity) {
-    currentStageKey = "study-plan";
-  } else if (!reviewedCurrentPractice) {
-    currentStageKey = "active-review";
   } else {
     currentStageKey = "next-loop";
   }
@@ -355,20 +393,15 @@ export function buildLoopJourneyModel(input: {
         : "Your saved study material will be checked here.",
     "learner-focus": loopState
       ? `${loopState.workspace.learner.name} is aiming for ${loopState.learningLoop.objective}.`
-      : "Set the goal, study time, and check-up size for this round.",
-    "check-up": loopState?.latestEvaluation
-      ? `${loopState.currentAssessment?.items.length ?? 0} check-up prompt${loopState.currentAssessment?.items.length === 1 ? "" : "s"} finished.`
-      : loopState?.currentAssessment
-        ? `${loopState.currentAssessment.items.length} prompt${loopState.currentAssessment.items.length === 1 ? "" : "s"} ready right now.`
-        : "Start a quick check-up to see what is already secure.",
+      : "Set the goal and choose how many short loops to start with.",
     "focus-areas": loopState?.latestEvaluation
       ? focusAreas.length > 0
         ? `${focusAreas.length} focus area${focusAreas.length === 1 ? "" : "s"} need more practice.`
-        : "The check-up found secure recall across the current prompts."
-      : "The next focus areas will appear after the check-up.",
-    "study-plan": loopState?.studyPlan
-      ? `${loopState.studyPlan.artifact.content.sessions.length} study slot${loopState.studyPlan.artifact.content.sessions.length === 1 ? "" : "s"} prepared.`
-      : "A practical plan will appear here once the focus areas are ready.",
+        : "The latest round found secure recall across the current prompts."
+      : "The next focus areas will appear after the first loop is complete.",
+    "loop-batch": loopState?.loopBatch
+      ? `${loopState.loopBatch.units.length} short loop${loopState.loopBatch.units.length === 1 ? "" : "s"} ready from the diagnosed gaps.`
+      : "The next short loops will appear here once the material is ready.",
     "active-review": loopState?.currentPracticeActivity
       ? `${loopState.currentPracticeActivity.flashcardSet.cards.length} review prompt${loopState.currentPracticeActivity.flashcardSet.cards.length === 1 ? "" : "s"} prepared.`
       : "The review set will appear here once the plan is ready.",
@@ -387,9 +420,8 @@ export function buildLoopJourneyModel(input: {
       "material-intake": "Add what you're studying",
       "material-summary": "Check what we found",
       "learner-focus": "Set your goal",
-      "check-up": "Try a check-up",
       "focus-areas": "See what to practise",
-      "study-plan": "Follow your plan",
+      "loop-batch": "Start a short loop",
       "active-review": "Do your review",
       "progress-update": "See what changed",
       "next-loop": "Next loop"
@@ -443,17 +475,140 @@ function statusLabel(state: JourneyStageState): string {
   }
 }
 
+function normalize(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function answerTokenOverlap(left: string, right: string): number {
+  const leftTokens = new Set(normalize(left).split(" ").filter(Boolean));
+  const rightTokens = new Set(normalize(right).split(" ").filter(Boolean));
+
+  if (leftTokens.size === 0 || rightTokens.size === 0) {
+    return 0;
+  }
+
+  const shared = [...leftTokens].filter((token) => rightTokens.has(token)).length;
+  return shared / Math.max(rightTokens.size, 1);
+}
+
+function quickCheckQuestionTypeLabel(question: LearningLoopUnitQuickCheckSnapshot): string {
+  switch (question.questionType) {
+    case "multiple_choice":
+      return "Single choice";
+    case "multiple_select":
+      return "Multi-select";
+    default:
+      return "Free form";
+  }
+}
+
+function buildAssessmentAnswerText(
+  item: AssessmentItem,
+  draft: AssessmentDraftAnswer | undefined
+): string {
+  if (!draft) {
+    return "";
+  }
+
+  if (item.questionType === "multiple_choice" || item.questionType === "multiple_select") {
+    return (item.options ?? [])
+      .filter((option) => draft.selectedOptionIds.includes(option.id))
+      .map((option) => option.text)
+      .join(" || ");
+  }
+
+  return draft.answerText.trim();
+}
+
+function assessmentAnswerProvided(item: AssessmentItem, draft: AssessmentDraftAnswer | undefined): boolean {
+  const answerText = buildAssessmentAnswerText(item, draft);
+  return answerText.trim().length > 0;
+}
+
+function isAssessmentLikelyCorrect(item: AssessmentItem, draft: AssessmentDraftAnswer | undefined): boolean {
+  if (!draft) {
+    return false;
+  }
+
+  if ((item.questionType === "multiple_choice" || item.questionType === "multiple_select") && item.correctOptionIds?.length) {
+    const selected = new Set(draft.selectedOptionIds);
+    const correct = new Set(item.correctOptionIds);
+    return (
+      selected.size === correct.size &&
+      [...correct].every((optionId) => selected.has(optionId))
+    );
+  }
+
+  const answerText = buildAssessmentAnswerText(item, draft);
+  const normalizedAnswer = normalize(answerText);
+  const normalizedCanonical = normalize(item.canonicalAnswer);
+  if (!normalizedAnswer || !normalizedCanonical) {
+    return false;
+  }
+
+  if (
+    normalizedAnswer === normalizedCanonical ||
+    normalizedAnswer.includes(normalizedCanonical) ||
+    normalizedCanonical.includes(normalizedAnswer)
+  ) {
+    return true;
+  }
+
+  return answerTokenOverlap(answerText, item.canonicalAnswer) >= 0.6;
+}
+
+function assessmentFeedbackCopy(item: AssessmentItem, draft: AssessmentDraftAnswer | undefined): {
+  body: string;
+  title: string;
+  tone: "correct" | "needs_work";
+} {
+  if (isAssessmentLikelyCorrect(item, draft)) {
+    return {
+      title: "Secure enough to move on",
+      body:
+        item.sourceFact ??
+        item.canonicalAnswer,
+      tone: "correct"
+    };
+  }
+
+  return {
+    title: "Needs another look",
+    body:
+      item.hint ??
+      item.sourceFact ??
+      item.canonicalAnswer,
+    tone: "needs_work"
+  };
+}
+
 function useAssessmentAnswers(loopState: LearningLoopResumeResponse | null) {
   const assessment = loopState?.currentAssessment;
-  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [answers, setAnswers] = useState<Record<string, AssessmentDraftAnswer>>({});
+  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
 
   useEffect(() => {
     setAnswers(
-      Object.fromEntries((assessment?.items ?? []).map((item) => [item.id, ""]))
+      Object.fromEntries(
+        (assessment?.items ?? []).map((item) => [
+          item.id,
+          {
+            answerText: "",
+            checked: false,
+            hintShown: false,
+            selectedOptionIds: []
+          }
+        ])
+      )
     );
+    setCurrentQuestionIndex(0);
   }, [assessment?.id]);
 
-  return { answers, setAnswers };
+  return { answers, currentQuestionIndex, setAnswers, setCurrentQuestionIndex };
 }
 
 function useReviewResponses(practiceActivity: PracticeActivitySnapshot | undefined) {
@@ -477,6 +632,99 @@ function useReviewResponses(practiceActivity: PracticeActivitySnapshot | undefin
   }, [practiceActivity?.id]);
 
   return { responses, setResponses };
+}
+
+function useLoopQuickCheckAnswers(loopState: LearningLoopResumeResponse | null) {
+  const activeUnit = currentLoopUnit(loopState);
+  const [answers, setAnswers] = useState<Record<string, LoopQuickCheckDraft>>({});
+  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
+
+  useEffect(() => {
+    setAnswers(
+      Object.fromEntries(
+        (activeUnit?.quickCheckQuestions ?? []).map((question) => [
+          question.id,
+          {
+            answerText: "",
+            checked: false,
+            hintShown: false,
+            selectedOptionIds: []
+          }
+        ])
+      )
+    );
+    setCurrentQuestionIndex(0);
+  }, [activeUnit?.id]);
+
+  return { activeUnit, answers, currentQuestionIndex, setAnswers, setCurrentQuestionIndex };
+}
+
+function buildLoopQuickCheckAnswerText(
+  question: LearningLoopUnitQuickCheckSnapshot,
+  draft: LoopQuickCheckDraft | undefined
+): string {
+  if (!draft) {
+    return "";
+  }
+
+  if (question.questionType === "multiple_choice" || question.questionType === "multiple_select") {
+    return (question.options ?? [])
+      .filter((option) => draft.selectedOptionIds.includes(option.id))
+      .map((option) => option.text)
+      .join(" || ");
+  }
+
+  return draft.answerText.trim();
+}
+
+function loopQuickCheckAnswerProvided(
+  question: LearningLoopUnitQuickCheckSnapshot,
+  draft: LoopQuickCheckDraft | undefined
+): boolean {
+  return buildLoopQuickCheckAnswerText(question, draft).trim().length > 0;
+}
+
+function isLoopQuickCheckLikelyCorrect(
+  question: LearningLoopUnitQuickCheckSnapshot,
+  draft: LoopQuickCheckDraft | undefined
+): boolean {
+  if (!draft) {
+    return false;
+  }
+
+  if (
+    (question.questionType === "multiple_choice" || question.questionType === "multiple_select") &&
+    question.correctOptionIds?.length
+  ) {
+    const selected = new Set(draft.selectedOptionIds);
+    const correct = new Set(question.correctOptionIds);
+    return selected.size === correct.size && [...correct].every((optionId) => selected.has(optionId));
+  }
+
+  return false;
+}
+
+function loopQuickCheckFeedbackCopy(
+  question: LearningLoopUnitQuickCheckSnapshot,
+  draft: LoopQuickCheckDraft | undefined
+): {
+  body: string;
+  title: string;
+  tone: "correct" | "needs_work";
+} {
+  if (isLoopQuickCheckLikelyCorrect(question, draft)) {
+    return {
+      title: "Secure enough to move on",
+      body: question.sourceFact ?? question.hint ?? "That matches the source-grounded answer.",
+      tone: "correct"
+    };
+  }
+
+  return {
+    title: "Use the source fact",
+    body: question.hint ?? question.sourceFact ?? "Check the short explanation, then try again in the review set.",
+    tone: "needs_work"
+  };
 }
 
 export function LoopJourneyPage(props: LoopJourneyPageProps) {
@@ -518,6 +766,7 @@ export function LoopJourneyPage(props: LoopJourneyPageProps) {
     onResumeLoopIdChange,
     onResumeSubmit,
     onReviewSubmit,
+    onStartNewRound,
     onSelectedDemoMaterialChange
   } = props;
 
@@ -532,8 +781,15 @@ export function LoopJourneyPage(props: LoopJourneyPageProps) {
     [loopState, loopValues, masterDataStatus, masterDataValues]
   );
   const currentStageRef = useRef<HTMLElement | null>(null);
-  const { answers, setAnswers } = useAssessmentAnswers(loopState);
+  const { answers, currentQuestionIndex, setAnswers, setCurrentQuestionIndex } = useAssessmentAnswers(loopState);
   const { responses, setResponses } = useReviewResponses(loopState?.currentPracticeActivity);
+  const {
+    activeUnit,
+    answers: loopQuickCheckAnswers,
+    currentQuestionIndex: currentLoopQuickCheckIndex,
+    setAnswers: setLoopQuickCheckAnswers,
+    setCurrentQuestionIndex: setCurrentLoopQuickCheckIndex
+  } = useLoopQuickCheckAnswers(loopState);
   const focusAreas = remainingFocusAreas(loopState);
   const improvedItems = loopState?.latestActiveReviewSession?.itemResults.filter((result) => result.correct) ?? [];
   const nextLoopStart = loopState?.latestActiveReviewSession?.nextReviewAt;
@@ -565,7 +821,7 @@ export function LoopJourneyPage(props: LoopJourneyPageProps) {
     await onAssessmentSubmit(
       loopState.currentAssessment.items.map((item) => ({
         itemId: item.id,
-        answer: answers[item.id] ?? ""
+        answer: buildAssessmentAnswerText(item, answers[item.id])
       }))
     );
   }
@@ -623,6 +879,11 @@ export function LoopJourneyPage(props: LoopJourneyPageProps) {
               {resumePending ? "Loading..." : "Resume"}
             </button>
           </form>
+          {loopState ? (
+            <button type="button" className="secondary-cta" onClick={onStartNewRound}>
+              Start a new round
+            </button>
+          ) : null}
           <p className="hint">
             Demo materials available across {demoTopics.join(", ")}.
           </p>
@@ -894,23 +1155,27 @@ export function LoopJourneyPage(props: LoopJourneyPageProps) {
 
                         <div className="field-grid">
                           <label>
-                            Check-up prompts
-                            <input
-                              type="number"
-                              min={1}
-                              max={10}
-                              value={loopValues.questionCount}
+                            Round pace
+                            <select
+                              value={deriveLoopPace(loopValues.questionCount)}
                               onChange={(event) =>
                                 onLoopValuesChange({
                                   ...loopValues,
-                                  questionCount: Number(event.target.value) || 1
+                                  questionCount: loopCountForPace(event.target.value as LoopPace)
                                 })
                               }
-                            />
+                            >
+                              <option value="quick">Quick</option>
+                              <option value="standard">Standard</option>
+                              <option value="deep">Deep</option>
+                            </select>
+                            <span className="hint">
+                              Quick starts with a short batch. Deep queues more loops before the round adapts again.
+                            </span>
                           </label>
 
                           <label>
-                            Review prompts
+                            Review set size
                             <input
                               type="number"
                               min={1}
@@ -926,23 +1191,6 @@ export function LoopJourneyPage(props: LoopJourneyPageProps) {
                           </label>
                         </div>
 
-                        <div>
-                          <p className="subtle-heading">Weekly study time</p>
-                          <div className="minutes-grid">
-                            {studyDays.map((day) => (
-                              <label key={day}>
-                                {day}
-                                <input
-                                  type="number"
-                                  min={0}
-                                  value={loopValues.availableMinutesByDay[day]}
-                                  onChange={(event) => onDayMinutesChange(day, event.target.value)}
-                                />
-                              </label>
-                            ))}
-                          </div>
-                        </div>
-
                         <button
                           type="button"
                           className="primary-cta"
@@ -950,62 +1198,10 @@ export function LoopJourneyPage(props: LoopJourneyPageProps) {
                           disabled={assessmentPending}
                           onClick={() => void onGenerateCheckUp()}
                         >
-                          {assessmentPending ? "Getting ready..." : "Start my first check-up"}
+                          {assessmentPending ? "Getting ready..." : "Start my first loop"}
                         </button>
                         {assessmentError ? <p className="error">{assessmentError}</p> : null}
                       </div>
-                    ) : null}
-
-                    {stage.key === "check-up" ? (
-                      loopState?.currentAssessment ? (
-                        <form className="stage-form" onSubmit={handleAssessmentFormSubmit}>
-                          <p className="journey-note">
-                            {loopState.assessmentArtifact?.content.instructions ??
-                              "Answer each prompt in your own words."}
-                          </p>
-                          {loopState.currentAssessment.items.map((item, index) => (
-                            <label key={item.id}>
-                              Prompt {index + 1}
-                              <span className="field-caption">{item.prompt}</span>
-                              <textarea
-                                rows={3}
-                                value={answers[item.id] ?? ""}
-                                onChange={(event) =>
-                                  setAnswers((current) => ({
-                                    ...current,
-                                    [item.id]: event.target.value
-                                  }))
-                                }
-                              />
-                            </label>
-                          ))}
-                          <button
-                            type="submit"
-                            className="primary-cta"
-                            data-primary-cta="true"
-                            disabled={attemptPending}
-                          >
-                            {attemptPending ? "Checking..." : "Finish this check-up"}
-                          </button>
-                          {attemptError ? <p className="error">{attemptError}</p> : null}
-                        </form>
-                      ) : (
-                        <div className="stage-form">
-                          <p className="journey-note">
-                            Build a quick check-up from the saved study prompts for {loopValues.topic}.
-                          </p>
-                          <button
-                            type="button"
-                            className="primary-cta"
-                            data-primary-cta="true"
-                            disabled={assessmentPending}
-                            onClick={() => void onGenerateCheckUp()}
-                          >
-                            {assessmentPending ? "Preparing..." : "Prepare my check-up"}
-                          </button>
-                          {assessmentError ? <p className="error">{assessmentError}</p> : null}
-                        </div>
-                      )
                     ) : null}
 
                     {stage.key === "focus-areas" ? (
@@ -1014,6 +1210,41 @@ export function LoopJourneyPage(props: LoopJourneyPageProps) {
                           <p className="subtle-heading">Current check-up score</p>
                           <strong>{formatPercent(loopState?.latestEvaluation?.score ?? 0)}</strong>
                         </div>
+                        {loopState?.latestEvaluation && loopState.currentAssessment ? (
+                          <div className="journey-list compact-list">
+                            {loopState.latestEvaluation.itemResults.map((result) => {
+                              const item = loopState.currentAssessment?.items.find(
+                                (candidate) => candidate.id === result.itemId
+                              );
+                              if (!item) {
+                                return null;
+                              }
+
+                              return (
+                                <div
+                                  key={result.itemId}
+                                  className="list-card"
+                                  data-feedback-tone={result.correct ? "correct" : "needs_work"}
+                                >
+                                  <p className="list-title">{item.prompt}</p>
+                                  <p>{result.feedback}</p>
+                                  <div className="checkpoint-row">
+                                    <span
+                                      className={
+                                        result.correct
+                                          ? "checkpoint-chip checkpoint-chip-success"
+                                          : "checkpoint-chip checkpoint-chip-warning"
+                                      }
+                                    >
+                                      {result.correct ? "Secure" : "Needs work"}
+                                    </span>
+                                    <span className="checkpoint-chip">{item.difficulty}</span>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : null}
                         <div className="journey-list">
                           {(loopState?.knowledgeGaps ?? []).map((gap) => (
                             <div key={gap.id} className="list-card">
@@ -1022,46 +1253,352 @@ export function LoopJourneyPage(props: LoopJourneyPageProps) {
                             </div>
                           ))}
                         </div>
-                        <button
-                          type="button"
-                          className="primary-cta"
-                          data-primary-cta="true"
-                          disabled={studyPlanPending}
-                          onClick={() => void onBuildPlan()}
-                        >
-                          {studyPlanPending ? "Planning..." : "Build my plan"}
-                        </button>
-                        {studyPlanError ? <p className="error">{studyPlanError}</p> : null}
+                        {!loopState?.loopBatch ? (
+                          <>
+                            <p className="journey-note">
+                              If short loop batching is unavailable for an older round, you can still
+                              use the legacy study-plan route.
+                            </p>
+                            <button
+                              type="button"
+                              className="secondary-cta"
+                              disabled={studyPlanPending}
+                              onClick={() => void onBuildPlan()}
+                            >
+                              {studyPlanPending ? "Planning..." : "Use the legacy plan fallback"}
+                            </button>
+                            {studyPlanError ? <p className="error">{studyPlanError}</p> : null}
+                          </>
+                        ) : null}
                       </div>
                     ) : null}
 
-                    {stage.key === "study-plan" ? (
+                    {stage.key === "loop-batch" ? (
                       <div className="stage-form">
                         <p className="journey-note">
-                          {loopState?.studyPlan?.artifact.content.summary ??
-                            "A practical plan will appear here."}
+                          {loopState?.loopBatch?.overview ??
+                            "The next short loops will appear here."}
                         </p>
+                        {activeUnit ? (
+                          <section className="assessment-game">
+                            <div className="assessment-progress">
+                              <div className="assessment-track" aria-hidden="true">
+                                <div
+                                  className="assessment-track-fill"
+                                  style={{
+                                    width: `${((currentLoopQuickCheckIndex + 1) / Math.max(activeUnit.quickCheckQuestions.length, 1)) * 100}%`
+                                  }}
+                                />
+                              </div>
+                              <span>
+                                Quick check {Math.min(currentLoopQuickCheckIndex + 1, activeUnit.quickCheckQuestions.length)} of{" "}
+                                {activeUnit.quickCheckQuestions.length}
+                              </span>
+                            </div>
+
+                            {activeUnit.quickCheckQuestions[currentLoopQuickCheckIndex] ? (
+                              <div className="assessment-card">
+                                <p className="subtle-heading">{activeUnit.focus}</p>
+                                <p className="list-title">
+                                  {activeUnit.quickCheckQuestions[currentLoopQuickCheckIndex].prompt}
+                                </p>
+                                <p className="hint">
+                                  {quickCheckQuestionTypeLabel(
+                                    activeUnit.quickCheckQuestions[currentLoopQuickCheckIndex]
+                                  )}
+                                </p>
+
+                                {activeUnit.quickCheckQuestions[currentLoopQuickCheckIndex].questionType === "multiple_choice" ||
+                                activeUnit.quickCheckQuestions[currentLoopQuickCheckIndex].questionType === "multiple_select" ? (
+                                  <div className="assessment-options">
+                                    {(activeUnit.quickCheckQuestions[currentLoopQuickCheckIndex].options ?? []).map((option) => {
+                                      const isMulti =
+                                        activeUnit.quickCheckQuestions[currentLoopQuickCheckIndex].questionType ===
+                                        "multiple_select";
+                                      const selected =
+                                        loopQuickCheckAnswers[
+                                          activeUnit.quickCheckQuestions[currentLoopQuickCheckIndex].id
+                                        ]?.selectedOptionIds.includes(option.id) ?? false;
+
+                                      return (
+                                        <button
+                                          key={option.id}
+                                          type="button"
+                                          className="option-card"
+                                          data-option-selected={selected}
+                                          onClick={() =>
+                                            setLoopQuickCheckAnswers((current) => {
+                                              const questionId =
+                                                activeUnit.quickCheckQuestions[currentLoopQuickCheckIndex].id;
+                                              const existing = current[questionId] ?? {
+                                                answerText: "",
+                                                checked: false,
+                                                hintShown: false,
+                                                selectedOptionIds: []
+                                              };
+                                              const nextSelected = isMulti
+                                                ? selected
+                                                  ? existing.selectedOptionIds.filter((id) => id !== option.id)
+                                                  : [...existing.selectedOptionIds, option.id]
+                                                : [option.id];
+
+                                              return {
+                                                ...current,
+                                                [questionId]: {
+                                                  ...existing,
+                                                  checked: false,
+                                                  selectedOptionIds: nextSelected
+                                                }
+                                              };
+                                            })
+                                          }
+                                        >
+                                          {option.text}
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                ) : (
+                                  <label>
+                                    Your answer
+                                    <textarea
+                                      rows={3}
+                                      value={
+                                        loopQuickCheckAnswers[
+                                          activeUnit.quickCheckQuestions[currentLoopQuickCheckIndex].id
+                                        ]?.answerText ?? ""
+                                      }
+                                      onChange={(event) =>
+                                        setLoopQuickCheckAnswers((current) => ({
+                                          ...current,
+                                          [activeUnit.quickCheckQuestions[currentLoopQuickCheckIndex].id]: {
+                                            answerText: event.target.value,
+                                            checked: false,
+                                            hintShown:
+                                              current[
+                                                activeUnit.quickCheckQuestions[currentLoopQuickCheckIndex].id
+                                              ]?.hintShown ?? false,
+                                            selectedOptionIds: []
+                                          }
+                                        }))
+                                      }
+                                    />
+                                  </label>
+                                )}
+
+                                <div className="assessment-utility-row">
+                                  <button
+                                    type="button"
+                                    className="secondary-cta"
+                                    onClick={() =>
+                                      setLoopQuickCheckAnswers((current) => ({
+                                        ...current,
+                                        [activeUnit.quickCheckQuestions[currentLoopQuickCheckIndex].id]: {
+                                          answerText:
+                                            current[
+                                              activeUnit.quickCheckQuestions[currentLoopQuickCheckIndex].id
+                                            ]?.answerText ?? "",
+                                          checked:
+                                            current[
+                                              activeUnit.quickCheckQuestions[currentLoopQuickCheckIndex].id
+                                            ]?.checked ?? false,
+                                          hintShown: true,
+                                          selectedOptionIds:
+                                            current[
+                                              activeUnit.quickCheckQuestions[currentLoopQuickCheckIndex].id
+                                            ]?.selectedOptionIds ?? []
+                                        }
+                                      }))
+                                    }
+                                  >
+                                    Show hint
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="secondary-cta"
+                                    disabled={
+                                      !loopQuickCheckAnswerProvided(
+                                        activeUnit.quickCheckQuestions[currentLoopQuickCheckIndex],
+                                        loopQuickCheckAnswers[
+                                          activeUnit.quickCheckQuestions[currentLoopQuickCheckIndex].id
+                                        ]
+                                      )
+                                    }
+                                    onClick={() =>
+                                      setLoopQuickCheckAnswers((current) => ({
+                                        ...current,
+                                        [activeUnit.quickCheckQuestions[currentLoopQuickCheckIndex].id]: {
+                                          answerText:
+                                            current[
+                                              activeUnit.quickCheckQuestions[currentLoopQuickCheckIndex].id
+                                            ]?.answerText ?? "",
+                                          checked: true,
+                                          hintShown:
+                                            current[
+                                              activeUnit.quickCheckQuestions[currentLoopQuickCheckIndex].id
+                                            ]?.hintShown ?? false,
+                                          selectedOptionIds:
+                                            current[
+                                              activeUnit.quickCheckQuestions[currentLoopQuickCheckIndex].id
+                                            ]?.selectedOptionIds ?? []
+                                        }
+                                      }))
+                                    }
+                                  >
+                                    Check answer
+                                  </button>
+                                </div>
+
+                                {loopQuickCheckAnswers[
+                                  activeUnit.quickCheckQuestions[currentLoopQuickCheckIndex].id
+                                ]?.hintShown ? (
+                                  <div className="assessment-hint">
+                                    <p className="subtle-heading">Hint</p>
+                                    <p>
+                                      {activeUnit.quickCheckQuestions[currentLoopQuickCheckIndex].hint ??
+                                        activeUnit.quickCheckQuestions[currentLoopQuickCheckIndex].sourceFact ??
+                                        activeUnit.shortExplanation}
+                                    </p>
+                                  </div>
+                                ) : null}
+
+                                {loopQuickCheckAnswers[
+                                  activeUnit.quickCheckQuestions[currentLoopQuickCheckIndex].id
+                                ]?.checked ? (
+                                  <div
+                                    className="assessment-feedback"
+                                    data-feedback-tone={
+                                      loopQuickCheckFeedbackCopy(
+                                        activeUnit.quickCheckQuestions[currentLoopQuickCheckIndex],
+                                        loopQuickCheckAnswers[
+                                          activeUnit.quickCheckQuestions[currentLoopQuickCheckIndex].id
+                                        ]
+                                      ).tone
+                                    }
+                                  >
+                                    <p className="subtle-heading">
+                                      {
+                                        loopQuickCheckFeedbackCopy(
+                                          activeUnit.quickCheckQuestions[currentLoopQuickCheckIndex],
+                                          loopQuickCheckAnswers[
+                                            activeUnit.quickCheckQuestions[currentLoopQuickCheckIndex].id
+                                          ]
+                                        ).title
+                                      }
+                                    </p>
+                                    <p>
+                                      {
+                                        loopQuickCheckFeedbackCopy(
+                                          activeUnit.quickCheckQuestions[currentLoopQuickCheckIndex],
+                                          loopQuickCheckAnswers[
+                                            activeUnit.quickCheckQuestions[currentLoopQuickCheckIndex].id
+                                          ]
+                                        ).body
+                                      }
+                                    </p>
+                                  </div>
+                                ) : null}
+
+                                <div className="assessment-nav">
+                                  <button
+                                    type="button"
+                                    className="secondary-cta"
+                                    disabled={currentLoopQuickCheckIndex === 0}
+                                    onClick={() =>
+                                      setCurrentLoopQuickCheckIndex((current) => Math.max(current - 1, 0))
+                                    }
+                                  >
+                                    Back
+                                  </button>
+                                  <div className="assessment-dots">
+                                    {activeUnit.quickCheckQuestions.map((question, index) => {
+                                      const draft = loopQuickCheckAnswers[question.id];
+                                      const dotState =
+                                        index === currentLoopQuickCheckIndex
+                                          ? "current"
+                                          : draft?.checked
+                                            ? "done"
+                                            : loopQuickCheckAnswerProvided(question, draft)
+                                              ? "started"
+                                              : "idle";
+
+                                      return (
+                                        <button
+                                          key={question.id}
+                                          type="button"
+                                          className="assessment-dot"
+                                          data-dot-state={dotState}
+                                          onClick={() => setCurrentLoopQuickCheckIndex(index)}
+                                        />
+                                      );
+                                    })}
+                                  </div>
+                                  <button
+                                    type="button"
+                                    className="secondary-cta"
+                                    disabled={
+                                      currentLoopQuickCheckIndex >= activeUnit.quickCheckQuestions.length - 1
+                                    }
+                                    onClick={() =>
+                                      setCurrentLoopQuickCheckIndex((current) =>
+                                        Math.min(current + 1, activeUnit.quickCheckQuestions.length - 1)
+                                      )
+                                    }
+                                  >
+                                    Next
+                                  </button>
+                                </div>
+                              </div>
+                            ) : null}
+                          </section>
+                        ) : null}
                         <div className="journey-list compact-list">
-                          {loopState?.studyPlan?.artifact.content.sessions.map((session) => (
-                            <div key={`${session.day}-${session.activity}`} className="list-card">
+                          {loopState?.loopBatch?.units.map((unit) => (
+                            <div key={unit.id} className="list-card">
                               <p className="list-title">
-                                {session.day} · {session.minutes} minutes
+                                {unit.focus} · {unit.state.replace("_", " ")}
                               </p>
+                              <p>{unit.reason}</p>
+                              <p>{unit.shortExplanation}</p>
                               <p>
-                                {session.activity} so you can {session.outcome.toLowerCase()}.
+                                <strong>Do this:</strong> {unit.learnerTask}
                               </p>
+                              <div className="checkpoint-row">
+                                {unit.sourceRefs.map((sourceRef) => (
+                                  <span key={sourceRef} className="checkpoint-chip">
+                                    {sourceRef}
+                                  </span>
+                                ))}
+                              </div>
+                              <div className="journey-list compact-list">
+                                {unit.quickCheckQuestions.map((question) => (
+                                  <div key={question.id} className="list-card">
+                                    <p className="list-title">Quick check</p>
+                                    <p>{question.prompt}</p>
+                                    {question.questionType ? (
+                                      <p className="hint">
+                                        {question.questionType === "multiple_choice"
+                                          ? "Single choice"
+                                          : question.questionType === "multiple_select"
+                                            ? "Multi-select"
+                                            : "Free form"}
+                                      </p>
+                                    ) : null}
+                                  </div>
+                                ))}
+                              </div>
+                              {unit.reviewItems.length ? (
+                                <div className="checkpoint-row">
+                                  {unit.reviewItems.map((item) => (
+                                    <span key={item.id} className="checkpoint-chip">
+                                      {item.prompt}
+                                    </span>
+                                  ))}
+                                </div>
+                              ) : null}
                             </div>
                           ))}
                         </div>
-                        {loopState?.studyPlan?.artifact.content.checkpoints.length ? (
-                          <div className="checkpoint-row">
-                            {loopState.studyPlan.artifact.content.checkpoints.map((checkpoint) => (
-                              <span key={checkpoint} className="checkpoint-chip">
-                                {checkpoint}
-                              </span>
-                            ))}
-                          </div>
-                        ) : null}
                         <button
                           type="button"
                           className="primary-cta"
@@ -1069,7 +1606,7 @@ export function LoopJourneyPage(props: LoopJourneyPageProps) {
                           disabled={practicePending}
                           onClick={() => void onGenerateReview()}
                         >
-                          {practicePending ? "Preparing..." : "Prepare today's review"}
+                          {practicePending ? "Starting..." : "Start this loop"}
                         </button>
                         {practiceError ? <p className="error">{practiceError}</p> : null}
                       </div>
@@ -1207,13 +1744,13 @@ export function LoopJourneyPage(props: LoopJourneyPageProps) {
                             type="button"
                             className="primary-cta"
                             data-primary-cta="true"
-                            disabled={studyPlanPending}
-                            onClick={() => void onBuildPlan()}
+                            disabled={practicePending}
+                            onClick={() => void onGenerateReview()}
                           >
-                            {studyPlanPending ? "Starting..." : "Start the next loop"}
+                            {practicePending ? "Starting..." : "Start the next loop"}
                           </button>
                         ) : null}
-                        {studyPlanError ? <p className="error">{studyPlanError}</p> : null}
+                        {practiceError ? <p className="error">{practiceError}</p> : null}
                       </div>
                     ) : null}
                   </div>

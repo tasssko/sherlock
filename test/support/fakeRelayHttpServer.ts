@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { loopStudyRelayAllowedCommandNames } from "../../src/modules/runtime/LoopStudyRelayRuntimeProfile.js";
 
 export interface FakeRelayMessageRequest {
   content: {
@@ -84,6 +85,11 @@ export interface FakeRelayResolverInput {
 }
 
 export interface FakeRelayHttpServerOptions {
+  commandExecutionPolicy?: {
+    allowDirectCommandExecution?: boolean;
+    allowedCommandNames?: readonly string[];
+    registeredCommandNames?: readonly string[];
+  };
   resolver?: (input: FakeRelayResolverInput) => FakeRelayResponseShape;
 }
 
@@ -105,9 +111,26 @@ export function parseLoopStudyStructuredMessage(
 export function parseLoopStudyCommandContent(content: FakeRelayMessageRequest["content"]): {
   operation?: string;
   packet: Record<string, unknown>;
+};
+export function parseLoopStudyCommandContent(
+  content: FakeRelayMessageRequest["content"],
+  metadata: Record<string, unknown> | undefined
+): {
+  operation?: string;
+  packet: Record<string, unknown>;
+};
+export function parseLoopStudyCommandContent(
+  content: FakeRelayMessageRequest["content"],
+  metadata?: Record<string, unknown>
+): {
+  operation?: string;
+  packet: Record<string, unknown>;
 } {
   if (content.type === "command") {
-    const operation = relayOperationFromCommandName(content.name);
+    const operation =
+      relayOperationFromCommandName(content.name) ??
+      metadataOperation(metadata) ??
+      operationFromCandidateKind(content.input);
     return {
       operation,
       packet: {
@@ -120,7 +143,9 @@ export function parseLoopStudyCommandContent(content: FakeRelayMessageRequest["c
   if (content.type === "json") {
     const payload = (content.input ?? {}) as Record<string, unknown>;
     const operation =
-      typeof payload.operation === "string" ? payload.operation : undefined;
+      typeof payload.operation === "string"
+        ? payload.operation
+        : metadataOperation(metadata) ?? operationFromCandidateKind(payload);
     return {
       operation,
       packet: payload
@@ -340,6 +365,57 @@ export function buildLoopStudyRelayResult(
     };
   }
 
+  if (operation === "generateLearningLoopBatch") {
+    const interpretation = payload.materialInterpretation ?? {};
+    const objectiveRefs = Array.isArray(interpretation.learningObjectives)
+      ? interpretation.learningObjectives
+          .map((objective: any) => objective?.id)
+          .filter((value: unknown): value is string => typeof value === "string")
+      : [];
+    const sourceRefs = Array.isArray(interpretation.sourceMap)
+      ? interpretation.sourceMap
+          .map((entry: any) => entry?.sourceRef)
+          .filter((value: unknown): value is string => typeof value === "string")
+      : [];
+    const diagnosedGaps = Array.isArray(payload.diagnosedGaps) ? payload.diagnosedGaps : [];
+    const desiredLoopCount = Number(payload.desiredLoopCount ?? 3);
+    const targetDurationMinutes = Number(payload.targetLoopDurationMinutes ?? 5);
+    const mainTopic = String(interpretation.mainTopic ?? payload.topic ?? "study");
+
+    return {
+      schema: "LearningLoopBatchCandidate.v1",
+      overview: `Work through short ${mainTopic.toLowerCase()} loops before moving on.`,
+      targetDurationMinutes,
+      units: diagnosedGaps.slice(0, desiredLoopCount).map((gap: any, index: number) => ({
+        focus: String(gap.topic ?? mainTopic),
+        reason: `This loop was chosen because ${String(gap.description ?? "it was the least secure idea in the check-up").toLowerCase()}.`,
+        objectiveRefs: objectiveRefs.slice(0, 1),
+        sourceRefs: sourceRefs.slice(0, 2),
+        targetKnowledgeGapIds: [String(gap.id ?? `gap_${index + 1}`)],
+        shortExplanation:
+          String(interpretation.learnerFacingMaterialSummary ?? "") ||
+          `Revisit the key idea in ${mainTopic}.`,
+        learnerTask: `Spend ${targetDurationMinutes} minutes explaining ${String(gap.topic ?? mainTopic)} in your own words, then write one remembered example.`,
+        quickCheckQuestions: [
+          {
+            prompt: `How would you explain ${String(gap.topic ?? mainTopic)} without looking back at the notes?`
+          }
+        ],
+        reviewItems: sourceRefs.length
+          ? [
+              {
+                prompt: `What should you remember about ${String(gap.topic ?? mainTopic)}?`,
+                answer:
+                  String(interpretation.learnerFacingMaterialSummary ?? "") ||
+                  `Be able to explain ${String(gap.topic ?? mainTopic)} accurately from memory.`
+              }
+            ]
+          : [],
+        state: index === 0 ? "ready" : "locked"
+      }))
+    };
+  }
+
   if (operation === "generatePracticeActivity") {
     const sourceItems = Array.isArray(payload.selectedSourceItems)
       ? payload.selectedSourceItems
@@ -425,11 +501,25 @@ export class FakeRelayHttpServer {
     const messageId = `relay_message_${randomUUID()}`;
     const responseMessageId = `relay_response_message_${randomUUID()}`;
     const taskId = `relay_task_${randomUUID()}`;
-    const parsed = parseLoopStudyCommandContent(body.content);
+    const parsed = parseLoopStudyCommandContent(body.content, body.metadata);
     const explicitSupervisorPath =
       normalizeRecipient(to) === "@supervisor" ||
       normalizeRecipient(String(body.metadata?.controllerId ?? "")) ===
         "@supervisor";
+    const normalizedRecipient = normalizeRecipient(to);
+    const isCommand = body.content.type === "command";
+    const directCommandPolicy = {
+      allowDirectCommandExecution:
+        this.options.commandExecutionPolicy?.allowDirectCommandExecution ?? true,
+      registeredCommandNames: new Set(
+        this.options.commandExecutionPolicy?.registeredCommandNames ??
+          loopStudyRelayAllowedCommandNames
+      ),
+      allowedCommandNames: new Set(
+        this.options.commandExecutionPolicy?.allowedCommandNames ??
+          loopStudyRelayAllowedCommandNames
+      )
+    };
 
     if (
       explicitSupervisorPath &&
@@ -445,6 +535,48 @@ export class FakeRelayHttpServer {
       );
     }
 
+    if (isCommand) {
+      const commandName = String(body.content.name ?? "");
+      if (!directCommandPolicy.registeredCommandNames.has(commandName)) {
+        return jsonResponse(
+          {
+            schema: "RelayCommandError.v1",
+            error: "command_not_registered",
+            code: "COMMAND_NOT_REGISTERED",
+            message: `Direct command ${commandName || "<unknown>"} is not registered for runtime execution.`
+          },
+          404
+        );
+      }
+
+      if (
+        !directCommandPolicy.allowDirectCommandExecution ||
+        !directCommandPolicy.allowedCommandNames.has(commandName)
+      ) {
+        return jsonResponse(
+          {
+            schema: "RelayCommandError.v1",
+            error: "command_not_allowed",
+            code: "COMMAND_NOT_ALLOWED",
+            message: `Direct command ${commandName || "<unknown>"} is not allowed in workspace ${body.workspaceId}.`
+          },
+          403
+        );
+      }
+
+      if (!normalizedRecipient || normalizedRecipient === "@supervisor") {
+        return jsonResponse(
+          {
+            schema: "RelayCommandError.v1",
+            error: "no_capable_route",
+            code: "NO_CAPABLE_ROUTE",
+            message: `No capable direct route was available for command ${commandName || "<unknown>"}.`
+          },
+          422
+        );
+      }
+    }
+
     const request: FakeRelayMessageRecord = {
       ...body,
       conversationId,
@@ -454,8 +586,11 @@ export class FakeRelayHttpServer {
     };
     this.messages.push(request);
 
-    const taskKind =
-      normalizeRecipient(to) === "@tutor" ? "agent_task" : "controller_task";
+    const taskKind = isCommand
+      ? "agent_task"
+      : normalizedRecipient === "@tutor"
+        ? "controller_task"
+        : "controller_task";
     const responseShape =
       this.options.resolver?.({
         content: body.content,
@@ -502,6 +637,42 @@ export class FakeRelayHttpServer {
             metadata: body.metadata ?? {}
           }
         },
+        ...(isCommand
+          ? [
+              {
+                type: "command.executed_directly",
+                data: {
+                  commandName: body.content.name,
+                  recipient: normalizedRecipient,
+                  conversationId,
+                  messageId
+                }
+              }
+            ]
+          : [
+              {
+                type: "work_requirement.inferred",
+                data: {
+                  conversationId,
+                  messageId,
+                  workRequirement: {
+                    recipient: normalizedRecipient,
+                    strategy: "supervisor_inference"
+                  }
+                }
+              },
+              {
+                type: "supervisor.decision_made",
+                data: {
+                  conversationId,
+                  messageId,
+                  decision: {
+                    routedTo: normalizedRecipient,
+                    action: "delegate"
+                  }
+                }
+              }
+            ]),
         {
           type: "task.created",
           data: {
@@ -581,17 +752,39 @@ function normalizeRecipient(value: string | undefined): string | undefined {
 
 function relayOperationFromCommandName(name: string | undefined): string | undefined {
   switch (name) {
-    case "loop_study.interpret_master_data":
+    case "runtime.generate_structured_candidate":
+    case "runtime.evaluate_structured_response":
+      return undefined;
+    default:
+      return undefined;
+  }
+}
+
+function metadataOperation(metadata: Record<string, unknown> | undefined): string | undefined {
+  const operation = metadata?.operation;
+  return typeof operation === "string" ? operation : undefined;
+}
+
+function operationFromCandidateKind(
+  input: Record<string, unknown> | undefined
+): string | undefined {
+  const candidateKind = input?.candidateKind;
+  if (typeof candidateKind !== "string") {
+    return undefined;
+  }
+
+  switch (candidateKind) {
+    case "master_data_interpretation":
       return "interpretMasterData";
-    case "loop_study.generate_initial_assessment":
+    case "initial_assessment":
       return "generateInitialAssessment";
-    case "loop_study.evaluate_assessment_attempt":
+    case "assessment_attempt_evaluation":
       return "evaluateAssessmentAttempt";
-    case "loop_study.generate_study_plan":
+    case "study_plan":
       return "generateStudyPlan";
-    case "loop_study.generate_practice_activity":
+    case "practice_activity":
       return "generatePracticeActivity";
-    case "loop_study.evaluate_active_review_session":
+    case "active_review_evaluation":
       return "evaluateActiveReviewSession";
     default:
       return undefined;

@@ -113,9 +113,25 @@ export class PracticeActivityService {
       return aggregate;
     }
 
+    const updatedLoopBatch = record.loopBatches
+      .find((candidate) => candidate.learningLoopId === learningLoop.id)
+      ?.markFirstReadyInProgress();
+
+    const aggregateRecord = {
+      ...aggregate.value.record,
+      loopBatches: updatedLoopBatch
+        ? [
+            ...aggregate.value.record.loopBatches.filter(
+              (candidate) => candidate.learningLoopId !== learningLoop.id
+            ),
+            updatedLoopBatch
+          ]
+        : [...aggregate.value.record.loopBatches]
+    } satisfies LearningLoopRecord;
+
     return ok({
       aggregate: aggregate.value.aggregate,
-      record: appendSucceededRuntimeTrace(aggregate.value.record, {
+      record: appendSucceededRuntimeTrace(aggregateRecord, {
         seed: assembled.value.runtimeTrace,
         producedDomainIds: [assembled.value.practiceActivity.id, completedTask.value.id]
       })
@@ -175,12 +191,20 @@ export class PracticeActivityService {
       learningLoop,
       record
     });
+    const completedLoopBatch = record.loopBatches
+      .find((candidate) => candidate.learningLoopId === learningLoop.id)
+      ?.completeCurrentUnit();
+    const nextUnitGapIds = completedLoopBatch?.firstActionableUnit()?.targetKnowledgeGapIds ?? [];
+    const nextLearningLoopGapIds =
+      nextUnitGapIds.length > 0
+        ? nextUnitGapIds
+        : refreshedKnowledgeGaps.remainingKnowledgeGapIds;
 
     const events = createDomainEventRecorder(record.workspace.id);
     let updatedLoop = learningLoop.recordPracticeActivityCompleted(
       {
         activeReviewSessionId: activeReviewSession.value.id,
-        remainingKnowledgeGapIds: refreshedKnowledgeGaps.remainingKnowledgeGapIds,
+        remainingKnowledgeGapIds: nextLearningLoopGapIds,
         practiceActivityId: practiceActivity.id,
         masteryScore: activeReviewSession.value.masteryScore
       },
@@ -217,6 +241,12 @@ export class PracticeActivityService {
         updatedPracticeActivity
       ],
       activeReviewSessions: [...record.activeReviewSessions, activeReviewSession.value],
+      loopBatches: completedLoopBatch
+        ? [
+            ...record.loopBatches.filter((candidate) => candidate.learningLoopId !== learningLoop.id),
+            completedLoopBatch
+          ]
+        : [...record.loopBatches],
       runtimeConversationBindings: [...record.runtimeConversationBindings],
       runtimeTraces: [...record.runtimeTraces]
     } satisfies LearningLoopRecord;

@@ -25,14 +25,34 @@ function tokenize(value: string): readonly string[] {
 }
 
 export class PracticeSourceSelector {
-  constructor(private readonly repository: Pick<LearningLoopRepository, "findMasterDataByTopic">) {}
+  constructor(
+    private readonly repository: Pick<LearningLoopRepository, "findMasterDataByTopic" | "findMasterDataBySourceIds">
+  ) {}
 
   select(
     record: LearningLoopRecord,
     learningLoop: LearningLoop,
     cardCount: number
   ): Result<PracticeSourceSelection> {
+    const activeLoopUnit = record.loopBatches
+      .find((candidate) => candidate.learningLoopId === learningLoop.id)
+      ?.firstActionableUnit();
+
     if (!learningLoop.isDiagnosed()) {
+      if (activeLoopUnit && learningLoop.knowledgeGapIds.length > 0) {
+        const knowledgeGaps = record.knowledgeGaps.filter((gap) =>
+          learningLoop.knowledgeGapIds.includes(gap.id)
+        );
+        return this.selectFromLoopUnit(record, learningLoop, knowledgeGaps, activeLoopUnit, cardCount);
+      }
+
+      if (learningLoop.evaluationIds.length > 0 && learningLoop.knowledgeGapIds.length === 0) {
+        return err({
+          code: "VALIDATION_ERROR",
+          message: `Learning loop ${learningLoop.id} has no diagnosed gaps to practise. This round is already secure.`
+        });
+      }
+
       return err({
         code: "VALIDATION_ERROR",
         message: `Learning loop ${learningLoop.id} must be diagnosed before practice can be generated.`
@@ -47,6 +67,10 @@ export class PracticeSourceSelector {
         code: "VALIDATION_ERROR",
         message: `Learning loop ${learningLoop.id} has no diagnosed knowledge gaps to target.`
       });
+    }
+
+    if (activeLoopUnit) {
+      return this.selectFromLoopUnit(record, learningLoop, knowledgeGaps, activeLoopUnit, cardCount);
     }
 
     const selections: PracticeActivitySelection[] = [];
@@ -110,6 +134,68 @@ export class PracticeSourceSelector {
       knowledgeGaps,
       selections,
       sourceNames: [...sourceNames]
+    });
+  }
+
+  private selectFromLoopUnit(
+    record: LearningLoopRecord,
+    learningLoop: LearningLoop,
+    knowledgeGaps: readonly KnowledgeGap[],
+    activeLoopUnit: {
+      focus: string;
+      sourceRefs: readonly string[];
+      targetKnowledgeGapIds: readonly string[];
+    },
+    cardCount: number
+  ): Result<PracticeSourceSelection> {
+    const rows = this.repository.findMasterDataBySourceIds(learningLoop.toSnapshot().sourceIds);
+    const matchingGapIds = new Set(activeLoopUnit.targetKnowledgeGapIds);
+    const unitGaps = knowledgeGaps.filter((gap) => matchingGapIds.has(gap.id));
+    const candidates = rows.flatMap(({ source, items }) =>
+      items.map((item) => ({
+        source,
+        item
+      }))
+    );
+    const preferredCandidates = candidates.filter(({ item }) =>
+      activeLoopUnit.sourceRefs.includes(item.sourceRef ?? item.id)
+    );
+    const rankedCandidates =
+      preferredCandidates.length > 0
+        ? preferredCandidates
+        : candidates.filter(
+            ({ item }) =>
+              tokenize(item.subtopic ?? "").some((token) => tokenize(activeLoopUnit.focus).includes(token)) ||
+              tokenize(item.topic).some((token) => tokenize(activeLoopUnit.focus).includes(token))
+          );
+    const fallbackCandidates = rankedCandidates.length > 0 ? rankedCandidates : candidates;
+
+    if (fallbackCandidates.length === 0 || unitGaps.length === 0) {
+      return err({
+        code: "NOT_FOUND",
+        message: `No source-grounded material could be selected for loop unit ${activeLoopUnit.focus}.`
+      });
+    }
+
+    const selections: PracticeActivitySelection[] = [];
+    for (let index = 0; index < cardCount; index += 1) {
+      const chosenGap = unitGaps[index % unitGaps.length];
+      const chosenCandidate = fallbackCandidates[index % fallbackCandidates.length];
+      if (!chosenGap || !chosenCandidate) {
+        continue;
+      }
+
+      selections.push({
+        gap: chosenGap,
+        item: chosenCandidate.item,
+        source: chosenCandidate.source
+      });
+    }
+
+    return ok({
+      knowledgeGaps: unitGaps,
+      selections,
+      sourceNames: [...new Set(selections.map((selection) => selection.source.name))]
     });
   }
 }

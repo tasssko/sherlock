@@ -1,5 +1,6 @@
 import type { ActiveReviewSession } from "../../domain/learning/ActiveReviewSession.js";
 import type { Assessment, Attempt, Evaluation } from "../../domain/learning/Assessment.js";
+import type { LearningLoopBatch } from "../../domain/learning/LearningLoopBatch.js";
 import type {
   KnowledgeGap,
   LearningLoop,
@@ -35,6 +36,7 @@ export interface LearningLoopRecord {
   masteryProfiles: readonly MasteryProfile[];
   practiceActivities: readonly PracticeActivity[];
   activeReviewSessions: readonly ActiveReviewSession[];
+  loopBatches: readonly LearningLoopBatch[];
   runtimeConversationBindings: readonly RuntimeConversationBinding[];
   runtimeTraces: readonly RuntimeTrace[];
 }
@@ -54,6 +56,7 @@ export function createLearningLoopRecord(record: LearningLoopRecord): LearningLo
     masteryProfiles: [...record.masteryProfiles],
     practiceActivities: [...record.practiceActivities],
     activeReviewSessions: [...record.activeReviewSessions],
+    loopBatches: [...record.loopBatches],
     runtimeConversationBindings: [...record.runtimeConversationBindings],
     runtimeTraces: [...record.runtimeTraces]
   };
@@ -66,6 +69,10 @@ export interface LocatedLearningLoopRecord {
 
 export interface LearningLoopRepository {
   findMasterDataByTopic(topic: string): {
+    source: MasterDataSource;
+    items: readonly MasterDataItem[];
+  }[];
+  findMasterDataBySourceIds(sourceIds: readonly string[]): {
     source: MasterDataSource;
     items: readonly MasterDataItem[];
   }[];

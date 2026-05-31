@@ -16,6 +16,12 @@ import type { DomainEventRecorder } from "../primitives/Event.js";
 
 export type AssessmentKind = "initial-diagnostic";
 export type AssessmentDifficulty = "easy" | "medium" | "stretch";
+export type AssessmentQuestionType = "free_form" | "multiple_choice" | "multiple_select";
+
+export interface AssessmentOption {
+  id: string;
+  text: string;
+}
 
 export interface AssessmentItem {
   id: string;
@@ -25,6 +31,11 @@ export interface AssessmentItem {
   visibleMaterial: string;
   difficulty: AssessmentDifficulty;
   sourceMasterDataItemId: MasterDataItemId;
+  questionType?: AssessmentQuestionType;
+  options?: readonly AssessmentOption[];
+  correctOptionIds?: readonly string[];
+  hint?: string;
+  sourceFact?: string;
 }
 
 export interface AssessmentSnapshot {

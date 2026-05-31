@@ -2,6 +2,7 @@ import Fastify from "fastify";
 import { AssessmentAttemptController } from "../../modules/assessment/AssessmentAttemptController.js";
 import { InitialAssessmentController } from "../../modules/assessment/InitialAssessmentController.js";
 import { MasterDataUploadController } from "../../modules/assessment/MasterDataUploadController.js";
+import { InitialLoopBatchController } from "../../modules/learning/InitialLoopBatchController.js";
 import { LearningLoopController } from "../../modules/learning/LearningLoopController.js";
 import { StudyPlanController } from "../../modules/planning/StudyPlanController.js";
 import { SqliteLearningLoopRepository } from "../../modules/planning/SqliteLearningLoopRepository.js";
@@ -9,6 +10,7 @@ import { PracticeActivityController } from "../../modules/practice/PracticeActiv
 import { loadLoopStudyRuntimeConfig } from "../../modules/runtime/LoopStudyRuntimeConfig.js";
 import type { AgentRuntime } from "../../modules/runtime/AgentRuntime.js";
 import { FixtureAgentRuntime } from "../../modules/runtime/FixtureAgentRuntime.js";
+import { OpenAIStudyIntelligence } from "../../modules/runtime/OpenAIStudyIntelligence.js";
 import { RelayAgentRuntime } from "../../modules/runtime/RelayAgentRuntime.js";
 import { RelayWorkspaceBinding } from "../../modules/runtime/RelayWorkspaceBinding.js";
 import { RelayWorkspaceProvisioner } from "../../modules/runtime/RelayWorkspaceProvisioner.js";
@@ -18,7 +20,7 @@ import { registerMasterDataRoutes } from "./routes/masterData.js";
 import { registerPracticeActivityRoutes } from "./routes/practiceActivities.js";
 import { registerStudyPlanRoutes } from "./routes/studyPlans.js";
 
-type RuntimeMode = "fixture" | "relay";
+type RuntimeMode = "fixture" | "openai" | "relay";
 
 interface RuntimeBootstrap {
   agentRuntime: AgentRuntime;
@@ -27,7 +29,7 @@ interface RuntimeBootstrap {
   defaultAgentHandle?: string;
   relayWorkspaceId?: string;
   runtimeMode: RuntimeMode;
-  runtimeName: "FixtureAgentRuntime" | "RelayAgentRuntime";
+  runtimeName: "FixtureAgentRuntime" | "OpenAIStudyIntelligence" | "RelayAgentRuntime";
 }
 
 export interface RuntimeBootLogger {
@@ -39,6 +41,7 @@ export interface CreateServerControllers {
   agentRuntime?: AgentRuntime;
   assessmentAttemptController?: AssessmentAttemptController;
   initialAssessmentController?: InitialAssessmentController;
+  initialLoopBatchController?: InitialLoopBatchController;
   learningLoopController?: LearningLoopController;
   masterDataUploadController?: MasterDataUploadController;
   practiceActivityController?: PracticeActivityController;
@@ -52,6 +55,20 @@ async function createAgentRuntime(
   diagnosticsLogger?: RuntimeBootLogger
 ): Promise<RuntimeBootstrap> {
   const runtimeConfig = loadLoopStudyRuntimeConfig(process.env);
+  if (runtimeConfig.runtimeMode === "openai" && runtimeConfig.openai) {
+    return {
+      agentRuntime: new OpenAIStudyIntelligence({
+        apiKey: runtimeConfig.openai.apiKey,
+        baseUrl: runtimeConfig.openai.baseUrl,
+        logger: diagnosticsLogger,
+        model: runtimeConfig.openai.model
+      }),
+      compatibilityWarnings: runtimeConfig.compatibilityWarnings,
+      runtimeMode: "openai",
+      runtimeName: "OpenAIStudyIntelligence"
+    };
+  }
+
   if (runtimeConfig.runtimeMode === "relay" && runtimeConfig.relay) {
     const binding = provisioner
       ? await provisioner.ensureProvisionedBinding()
@@ -99,6 +116,15 @@ function describeInjectedRuntime(agentRuntime: AgentRuntime): RuntimeBootstrap {
     };
   }
 
+  if (agentRuntime instanceof OpenAIStudyIntelligence) {
+    return {
+      agentRuntime,
+      compatibilityWarnings: [],
+      runtimeMode: "openai",
+      runtimeName: "OpenAIStudyIntelligence"
+    };
+  }
+
   return {
     agentRuntime,
     compatibilityWarnings: [],
@@ -130,6 +156,8 @@ export function logRuntimeBootstrap(
   const message =
     bootstrap.runtimeMode === "relay"
       ? "loop.study booted with RelayAgentRuntime and provisioned the Relay workspace binding."
+      : bootstrap.runtimeMode === "openai"
+        ? "loop.study booted with OpenAIStudyIntelligence."
       : "loop.study booted with FixtureAgentRuntime.";
 
   logger.info(bindings, message);
@@ -178,6 +206,8 @@ export async function createServer(controllers: CreateServerControllers = {}) {
     controllers.masterDataUploadController ?? new MasterDataUploadController(repository, agentRuntime);
   const learningLoopController =
     controllers.learningLoopController ?? new LearningLoopController(repository);
+  const initialLoopBatchController =
+    controllers.initialLoopBatchController ?? new InitialLoopBatchController(repository, agentRuntime);
   const practiceActivityController =
     controllers.practiceActivityController ??
     new PracticeActivityController(repository, undefined, undefined, agentRuntime);
@@ -188,7 +218,7 @@ export async function createServer(controllers: CreateServerControllers = {}) {
 
   await registerStudyPlanRoutes(server, studyPlanController);
   await registerAssessmentRoutes(server, initialAssessmentController, assessmentAttemptController);
-  await registerLearningLoopRoutes(server, learningLoopController);
+  await registerLearningLoopRoutes(server, learningLoopController, initialLoopBatchController);
   await registerMasterDataRoutes(server, masterDataUploadController);
   await registerPracticeActivityRoutes(server, practiceActivityController);
 

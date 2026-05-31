@@ -18,12 +18,16 @@ function createWorkspaceRecord(overrides: Partial<RelayWorkspaceRecord> = {}): R
     status: "active",
     defaultControllerId: undefined,
     context: {
-      operatingInstructions: [],
+      operatingInstructions: [
+        ...defaultLoopStudyRelayRuntimeProfile.operatingInstructions
+      ],
       defaultSupervisorAgentHandle: "tutor",
       availableAgentHandles: ["tutor"]
     },
     defaultPolicy: {
       requireApprovalForSideEffects: [],
+      allowDirectCommandExecution: true,
+      allowedCommandNames: [...defaultLoopStudyRelayRuntimeProfile.defaultPolicy.allowedCommandNames],
       allowTaskCreationFromConversation: true,
       allowMessageOnlyResponses: true,
       allowSupervisorDelegation: false,

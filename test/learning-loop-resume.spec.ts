@@ -74,8 +74,13 @@ describe("Learning loop resume", () => {
         url: `/v1/learning-loops/${assessment.learningLoop.id}`
       });
       expect(afterAttempt.statusCode).toBe(200);
-      expect(deriveGoldenPathStep(afterAttempt.json())).toBe("plan-study");
+      expect(deriveGoldenPathStep(afterAttempt.json())).toBe("start-loop");
       expect(afterAttempt.json().knowledgeGaps.length).toBeGreaterThan(0);
+      expect(afterAttempt.json().loopBatch).toEqual(
+        expect.objectContaining({
+          units: expect.any(Array)
+        })
+      );
 
       await server.inject({
         method: "POST",
@@ -147,11 +152,14 @@ describe("Learning loop resume", () => {
         url: `/v1/learning-loops/${assessment.learningLoop.id}`
       });
       expect(afterCompletion.statusCode).toBe(200);
-      expect(deriveGoldenPathStep(afterCompletion.json())).toBe("track-progress");
+      expect(deriveGoldenPathStep(afterCompletion.json())).toBe("start-loop");
       expect(afterCompletion.json()).toMatchObject({
         masteryProfile: expect.any(Object),
         latestActiveReviewSession: expect.objectContaining({
           nextReviewAt: expect.any(String)
+        }),
+        nextAction: expect.objectContaining({
+          kind: "start-loop-unit"
         })
       });
     } finally {

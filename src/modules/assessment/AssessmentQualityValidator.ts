@@ -9,6 +9,16 @@ function normalize(value: string): string {
     .trim();
 }
 
+function meaningfulLeakCandidate(value: string): boolean {
+  const normalized = normalize(value);
+  if (!normalized) {
+    return false;
+  }
+
+  const tokenCount = normalized.split(" ").filter(Boolean).length;
+  return tokenCount >= 2 || normalized.length >= 12;
+}
+
 export class AssessmentQualityValidator {
   validate(items: readonly AssessmentItem[] | null | undefined): Result<readonly AssessmentItem[]> {
     if (!Array.isArray(items)) {
@@ -17,6 +27,8 @@ export class AssessmentQualityValidator {
         message: "Assessment generation did not return a valid items array."
       });
     }
+
+    const seenPrompts = new Map<string, string>();
 
     for (const item of items) {
       const normalizedPrompt = normalize(item.prompt);
@@ -42,6 +54,38 @@ export class AssessmentQualityValidator {
           code: "VALIDATION_ERROR",
           message: `Assessment item ${item.id} leaks the answer verbatim from visible study material.`
         });
+      }
+
+      const existingPromptId = seenPrompts.get(normalizedPrompt);
+      if (existingPromptId) {
+        return err({
+          code: "VALIDATION_ERROR",
+          message: `Assessment items ${existingPromptId} and ${item.id} repeat the same question.`
+        });
+      }
+
+      seenPrompts.set(normalizedPrompt, item.id);
+    }
+
+    for (const item of items) {
+      const normalizedPrompt = normalize(item.prompt);
+
+      for (const otherItem of items) {
+        if (otherItem.id === item.id) {
+          continue;
+        }
+
+        const normalizedOtherAnswer = normalize(otherItem.canonicalAnswer);
+        if (!meaningfulLeakCandidate(normalizedOtherAnswer)) {
+          continue;
+        }
+
+        if (normalizedPrompt.includes(normalizedOtherAnswer)) {
+          return err({
+            code: "VALIDATION_ERROR",
+            message: `Assessment item ${item.id} leaks the answer to ${otherItem.id} in its prompt.`
+          });
+        }
       }
     }
 

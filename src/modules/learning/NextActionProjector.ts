@@ -1,10 +1,12 @@
 import type { LearningLoop } from "../../domain/learning/LearningLoop.js";
+import type { LearningLoopBatch } from "../../domain/learning/LearningLoopBatch.js";
 import type { NextActionProjection } from "../../domain/study/NextAction.js";
 
 export class NextActionProjector {
   project(input: {
     assessmentId?: string;
     learningLoop: LearningLoop;
+    loopBatch?: LearningLoopBatch;
     practiceActivityId?: string;
     workPlanId?: string;
   }): NextActionProjection {
@@ -15,6 +17,17 @@ export class NextActionProjector {
         kind: "complete-initial-assessment",
         summary: "Complete the current diagnostic assessment so the loop can identify gaps.",
         relatedId: input.assessmentId
+      };
+    }
+
+    if (phase === "loop-batching") {
+      const actionableUnit = input.loopBatch?.firstActionableUnit();
+      return {
+        kind: "start-loop-unit",
+        summary: actionableUnit
+          ? `Start the next short loop on ${actionableUnit.focus} and complete one clear task before moving on.`
+          : "Start the next short loop and work through the first focused task.",
+        relatedId: actionableUnit?.id
       };
     }
 

@@ -1,5 +1,6 @@
 import type {
   AssessmentSnapshot,
+  AssessmentQuestionType,
   AttemptSnapshot,
   EvaluationSnapshot
 } from "../learning/Assessment.js";
@@ -14,6 +15,7 @@ import type { DomainEvent } from "../primitives/Event.js";
 import type { TaskSnapshot } from "../primitives/Task.js";
 import type { WorkspaceSnapshot } from "../primitives/Workspace.js";
 import type { LearningLoopRouteProjection } from "./NextAction.js";
+import type { LearningLoopBatchSnapshot } from "./LoopBatches.js";
 
 export interface CreateInitialAssessmentCommand {
   learnerName: string;
@@ -22,10 +24,28 @@ export interface CreateInitialAssessmentCommand {
   questionCount: number;
 }
 
+export interface AssessmentBlueprint {
+  coveredSubtopics: readonly string[];
+  difficultyProfile: {
+    easy: number;
+    medium: number;
+    stretch: number;
+  };
+  maxQuestionCount: number;
+  objectiveRefs: readonly string[];
+  questionCount: number;
+  questionTypeMix: readonly AssessmentQuestionType[];
+  rationale: string;
+  sourceRefs: readonly string[];
+  targetDurationMinutes: number;
+}
+
 export interface AssessmentArtifactItem {
   id: string;
   prompt: string;
   difficulty: "easy" | "medium" | "stretch";
+  questionType?: "free_form" | "multiple_choice" | "multiple_select";
+  hint?: string;
 }
 
 export interface AssessmentArtifactContent {
@@ -59,6 +79,7 @@ export interface AssessmentAttemptResponse extends LearningLoopRouteProjection {
   attempt: AttemptSnapshot;
   evaluation: EvaluationSnapshot;
   knowledgeGaps: readonly KnowledgeGapSnapshot[];
+  loopBatch?: LearningLoopBatchSnapshot;
   masteryProfile?: MasteryProfileSnapshot;
   events: readonly DomainEvent[];
 }

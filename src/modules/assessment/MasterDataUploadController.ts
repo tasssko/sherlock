@@ -1,5 +1,6 @@
 import type { Controller } from "../../domain/primitives/Controller.js";
 import { err, ok, type Result } from "../../domain/primitives/result.js";
+import { ZodError } from "zod";
 import type {
   MasterDataUploadResponse,
   UploadMasterDataCommand
@@ -77,9 +78,11 @@ export class MasterDataUploadController
       return err({
         code: "VALIDATION_ERROR",
         message:
-          error instanceof Error
-            ? error.message
-            : "Master data interpretation candidate failed validation."
+          error instanceof ZodError
+            ? "The material interpretation service returned a study-pack summary that loop.study could not use safely."
+            : error instanceof Error
+              ? error.message
+              : "Master data interpretation candidate failed validation."
       });
     }
 

@@ -3,7 +3,7 @@ import type { LearningLoopResumeResponse } from "../../domain/study/LearningLoop
 export type GoldenPathStep =
   | "prepare-loop"
   | "take-assessment"
-  | "plan-study"
+  | "start-loop"
   | "generate-practice"
   | "complete-review"
   | "track-progress";
@@ -18,8 +18,10 @@ export function deriveGoldenPathStep(
   switch (resume.nextAction.kind) {
     case "complete-initial-assessment":
       return "take-assessment";
+    case "start-loop-unit":
+      return "start-loop";
     case "review-study-plan":
-      return resume.studyPlan ? "generate-practice" : "plan-study";
+      return resume.studyPlan ? "generate-practice" : "start-loop";
     case "generate-practice-activity":
       return "generate-practice";
     case "complete-practice-activity":
@@ -27,7 +29,7 @@ export function deriveGoldenPathStep(
     case "track-mastery":
       return "track-progress";
     case "review-diagnosis":
-      return "plan-study";
+      return "start-loop";
     default:
       return "prepare-loop";
   }

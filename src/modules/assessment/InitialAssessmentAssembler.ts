@@ -97,7 +97,7 @@ export class InitialAssessmentAssembler {
           ],
           decisions: [
             `Selected source ${input.source.name}.`,
-            `Built ${input.context.questionCount} diagnostic items for ${input.context.topic}.`
+            `Built ${artifactContent.questionCount} diagnostic items for ${input.context.topic}.`
           ]
         })
       },

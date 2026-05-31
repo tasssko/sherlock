@@ -273,6 +273,13 @@ export function validateMasterDataInterpretationCandidate(
   const candidate = candidateSchema.parse(value);
   const sourceRefs = new Set(candidate.sourceMap.map((entry) => entry.sourceRef));
   const sourceMapByRef = new Map(candidate.sourceMap.map((entry) => [entry.sourceRef, entry.excerpt]));
+  const itemsBySourceRef = new Map<string, StructuredMasterDataFields[]>();
+
+  for (const item of candidate.items) {
+    const items = itemsBySourceRef.get(item.sourceRef) ?? [];
+    items.push(item);
+    itemsBySourceRef.set(item.sourceRef, items);
+  }
 
   assertSpecificField(candidate.detectedSubject, "detected subject");
   assertSpecificField(candidate.detectedYearGroup, "detected year group");
@@ -310,11 +317,6 @@ export function validateMasterDataInterpretationCandidate(
         `Learning objective ${objective.id} must be specific enough to guide study.`
       );
     }
-    if (!hasSpecificAnchor(objective.objective, candidate)) {
-      throw new Error(
-        `Learning objective ${objective.id} must reference a specific topic, subtopic, term, person, date, or process.`
-      );
-    }
 
     for (const sourceRef of objective.sourceRefs) {
       if (!sourceRefs.has(sourceRef)) {
@@ -329,6 +331,19 @@ export function validateMasterDataInterpretationCandidate(
           `Learning objective ${objective.id} references source ref ${sourceRef} without a useful excerpt.`
         );
       }
+    }
+
+    if (
+      !hasSpecificObjectiveAnchor({
+        candidate,
+        itemsBySourceRef,
+        objective,
+        sourceMapByRef
+      })
+    ) {
+      throw new Error(
+        `Learning objective ${objective.id} must reference a specific topic, subtopic, term, person, date, or process.`
+      );
     }
   }
 
@@ -371,23 +386,41 @@ export function buildInterpretationPrompt(item: StructuredMasterDataFields): str
     case "key_term":
       return `What does ${item.term ?? anchor ?? "this term"} mean?`;
     case "date":
-      return `What happened in ${item.date ?? anchor ?? "this date"}?`;
+      return `Why does ${item.date ?? anchor ?? "this date"} matter in ${context}?`;
     case "cause":
-      return `What was one cause linked to ${context}?`;
+      return anchor && !samePhrase(anchor, context)
+        ? `Why did ${anchor} matter in ${context}?`
+        : `What caused ${context}?`;
     case "event":
       return anchor
-        ? `What happened to ${anchor} during ${context}?`
+        ? `What happened to ${anchor} in ${context}?`
         : `What happened during ${context}?`;
     case "consequence":
       return `What was one consequence of ${context}?`;
     case "legacy":
-      return `What was part of ${item.topic}'s legacy?`;
+      return anchor && !samePhrase(anchor, context)
+        ? `What legacy did ${anchor} leave in ${context}?`
+        : `What legacy did ${context} leave behind?`;
     case "fact":
     default:
-      return anchor
-        ? `What should you remember about ${anchor} in ${context}?`
-        : `What is one key fact from ${context}?`;
+      return buildFactRecallPrompt(item, context, anchor);
   }
+}
+
+function buildFactRecallPrompt(
+  item: StructuredMasterDataFields,
+  context: string,
+  anchor: string | undefined
+): string {
+  if (anchor && !samePhrase(anchor, context) && !samePhrase(anchor, item.topic)) {
+    return `How does ${anchor} help explain ${context}?`;
+  }
+
+  if (context && !samePhrase(context, item.topic)) {
+    return `Explain one key idea about ${context} in ${item.topic}.`;
+  }
+
+  return `Explain one key idea about ${item.topic}.`;
 }
 
 export function buildInterpretationVisibleMaterial(item: StructuredMasterDataFields): string {
@@ -640,9 +673,9 @@ function findAnchor(content: string): string | undefined {
     return quoted[1];
   }
 
-  const dateMatch = content.match(/\b(?:\d{1,2}\s+[A-Z][a-z]+\s+\d{4}|\d{4}(?:[–-]\d{4})?)\b/);
-  if (dateMatch?.[0]) {
-    return dateMatch[0];
+  const dateMatch = extractDateFromText(content);
+  if (dateMatch) {
+    return dateMatch;
   }
 
   const properNouns = content.match(
@@ -651,6 +684,11 @@ function findAnchor(content: string): string | undefined {
   return properNouns?.find(
     (candidate) => candidate.length > 2 && !/^(?:The|A|An)$/i.test(candidate.trim())
   );
+}
+
+function extractDateFromText(content: string): string | undefined {
+  const dateMatch = content.match(/\b(?:\d{1,2}\s+[A-Z][a-z]+\s+\d{4}|\d{4}(?:[–-]\d{4})?)\b/);
+  return dateMatch?.[0];
 }
 
 function assertSpecificField(value: string, label: string) {
@@ -688,7 +726,7 @@ function requireTopLevelEvidenceCoverage(candidate: MasterDataInterpretationCand
       .map((item) => item.date)
       .filter((value): value is string => Boolean(value))
   );
-  if (dates.length > 0 && !hasIntersection(candidate.importantDates, dates)) {
+  if (dates.length > 0 && !hasDateCoverage(candidate.importantDates, dates)) {
     throw new Error(
       "Master data interpretation candidate must surface important dates when date items are present."
     );
@@ -731,7 +769,62 @@ function hasSpecificAnchor(
     ...candidate.processes
   ].filter((value) => !samePhrase(value, candidate.mainTopic));
 
-  return anchors.some((anchor) => containsPhrase(text, anchor));
+  return anchors.some((anchor) => matchesAnchorText(text, anchor));
+}
+
+function hasSpecificObjectiveAnchor(input: {
+  candidate: Pick<
+    MasterDataInterpretationCandidate,
+    | "importantDates"
+    | "keyPeople"
+    | "keyTerms"
+    | "mainTopic"
+    | "processes"
+    | "subtopics"
+  >;
+  itemsBySourceRef: ReadonlyMap<string, readonly StructuredMasterDataFields[]>;
+  objective: MasterDataInterpretationObjective;
+  sourceMapByRef: ReadonlyMap<string, string>;
+}): boolean {
+  if (hasSpecificAnchor(input.objective.objective, input.candidate)) {
+    return true;
+  }
+
+  const linkedAnchors = uniqueStrings([
+    ...input.objective.sourceRefs.flatMap((sourceRef) =>
+      extractSourceRefAnchors(sourceRef)
+    ),
+    ...input.objective.sourceRefs.flatMap((sourceRef) => {
+      const items = input.itemsBySourceRef.get(sourceRef) ?? [];
+      return items.flatMap((item) =>
+        [
+          item.topic,
+          item.subtopic,
+          item.term,
+          item.person,
+          item.date,
+          item.definition ? findAnchor(item.definition) : undefined,
+          findAnchor(item.content)
+        ].filter((value): value is string => Boolean(value))
+      );
+    }),
+    ...input.objective.sourceRefs.flatMap((sourceRef) => {
+      const excerpt = input.sourceMapByRef.get(sourceRef);
+      return excerpt ? [excerpt, findAnchor(excerpt)].filter((value): value is string => Boolean(value)) : [];
+    })
+  ]);
+
+  if (linkedAnchors.some((anchor) => matchesAnchorText(input.objective.objective, anchor))) {
+    return true;
+  }
+
+  const linkedExcerpts = input.objective.sourceRefs
+    .map((sourceRef) => input.sourceMapByRef.get(sourceRef))
+    .filter((excerpt): excerpt is string => Boolean(excerpt));
+
+  return linkedExcerpts.some((excerpt) =>
+    hasMeaningfulTokenOverlap(input.objective.objective, excerpt)
+  );
 }
 
 function hasIntersection(left: readonly string[], right: readonly string[]) {
@@ -739,10 +832,152 @@ function hasIntersection(left: readonly string[], right: readonly string[]) {
   return left.some((value) => rightSet.has(normalizePhrase(value)));
 }
 
+function hasDateCoverage(surfacedDates: readonly string[], itemDates: readonly string[]) {
+  const normalizedSurfacedDates = surfacedDates
+    .map((value) => extractDateFromText(value) ?? value)
+    .map(normalizePhrase);
+
+  return itemDates.every((itemDate) => {
+    const normalizedItemDate = normalizePhrase(itemDate);
+    return normalizedSurfacedDates.some(
+      (surfacedDate) =>
+        surfacedDate === normalizedItemDate ||
+        surfacedDate.includes(normalizedItemDate) ||
+        normalizedItemDate.includes(surfacedDate)
+    );
+  });
+}
+
 function containsPhrase(text: string, phrase: string) {
   const normalizedText = normalizePhrase(text);
   const normalizedPhrase = normalizePhrase(phrase);
   return normalizedPhrase.length > 0 && normalizedText.includes(normalizedPhrase);
+}
+
+function matchesAnchorText(text: string, anchor: string) {
+  if (containsPhrase(text, anchor)) {
+    return true;
+  }
+
+  const anchorTokens = tokenize(anchor)
+    .map(normalizeContentToken)
+    .filter((token) => token.length > 3);
+  if (anchorTokens.length === 0) {
+    return false;
+  }
+
+  const textTokens = tokenize(text)
+    .map(normalizeContentToken)
+    .filter((token) => token.length > 3);
+
+  return anchorTokens.every((anchorToken) =>
+    textTokens.some((textToken) => tokensAreSimilar(textToken, anchorToken))
+  );
+}
+
+function hasMeaningfulTokenOverlap(left: string, right: string): boolean {
+  const ignoredTokens = new Set([
+    "about",
+    "after",
+    "before",
+    "compare",
+    "describe",
+    "during",
+    "effect",
+    "effects",
+    "event",
+    "events",
+    "example",
+    "examples",
+    "explain",
+    "important",
+    "remember",
+    "revise",
+    "review",
+    "should",
+    "study",
+    "their",
+    "there",
+    "these",
+    "they",
+    "this",
+    "those",
+    "understand",
+    "using",
+    "what",
+    "when",
+    "where",
+    "which",
+    "with"
+  ]);
+
+  const leftTokens = new Set(
+    tokenize(left)
+      .map(normalizeContentToken)
+      .filter((token) => token.length > 3 && !ignoredTokens.has(token))
+  );
+  const rightTokens = new Set(
+    tokenize(right)
+      .map(normalizeContentToken)
+      .filter((token) => token.length > 3 && !ignoredTokens.has(token))
+  );
+
+  let overlap = 0;
+  for (const token of leftTokens) {
+    if (rightTokens.has(token)) {
+      overlap += 1;
+    }
+  }
+
+  return overlap >= 2;
+}
+
+function normalizeContentToken(token: string): string {
+  if (token.length <= 3) {
+    return token;
+  }
+
+  let normalized = token;
+  if (normalized.endsWith("ing") && normalized.length > 6) {
+    normalized = normalized.slice(0, -3);
+  } else if (normalized.endsWith("ed") && normalized.length > 5) {
+    normalized = normalized.slice(0, -2);
+  } else if (normalized.endsWith("es") && normalized.length > 5) {
+    normalized = normalized.slice(0, -2);
+  } else if (normalized.endsWith("s") && normalized.length > 4) {
+    normalized = normalized.slice(0, -1);
+  }
+
+  return normalized;
+}
+
+function tokensAreSimilar(left: string, right: string): boolean {
+  if (left === right) {
+    return true;
+  }
+
+  if (left.length >= 5 && right.length >= 5) {
+    return left.startsWith(right) || right.startsWith(left);
+  }
+
+  return false;
+}
+
+function extractSourceRefAnchors(sourceRef: string): string[] {
+  return sourceRef
+    .split(">")
+    .map((segment) => cleanCompatText(segment))
+    .filter((segment): segment is string => {
+      if (!segment) {
+        return false;
+      }
+
+      return (
+        !/^fact-\d+$/i.test(segment) &&
+        !/^compat-\w+-\d+$/i.test(segment) &&
+        !/^source-\d+$/i.test(segment)
+      );
+    });
 }
 
 function samePhrase(left: string, right: string) {
@@ -796,7 +1031,22 @@ function asStringArray(value: unknown): string[] {
   }
 
   return value
-    .map((entry) => (typeof entry === "string" ? cleanCompatText(entry) : undefined))
+    .map((entry) => {
+      if (typeof entry === "string") {
+        return cleanCompatText(entry);
+      }
+      if (isRecord(entry)) {
+        return firstNonEmptyString(
+          asNonEmptyString(entry.title),
+          asNonEmptyString(entry.name),
+          asNonEmptyString(entry.label),
+          asNonEmptyString(entry.subtopic),
+          asNonEmptyString(entry.value)
+        );
+      }
+
+      return undefined;
+    })
     .filter((entry): entry is string => Boolean(entry));
 }
 
@@ -834,6 +1084,21 @@ function inferSubjectFromText(value: string | undefined): string | undefined {
 }
 
 function normalizeSourceMapEntries(value: unknown): MasterDataSourceMapEntry[] {
+  if (isRecord(value)) {
+    return Object.entries(value)
+      .map(([sourceRef, excerpt]) => ({
+        sourceRef: cleanCompatText(sourceRef),
+        excerpt: typeof excerpt === "string" ? cleanCompatText(excerpt) : undefined
+      }))
+      .filter(
+        (entry): entry is MasterDataSourceMapEntry =>
+          typeof entry.sourceRef === "string" &&
+          entry.sourceRef.length > 0 &&
+          typeof entry.excerpt === "string" &&
+          entry.excerpt.length > 0
+      );
+  }
+
   if (!Array.isArray(value)) {
     return [];
   }
@@ -939,9 +1204,19 @@ function normalizeStructuredItems(
     }
 
     const sourceRef = asNonEmptyString(entry.sourceRef);
-    const content = asNonEmptyString(entry.content);
-    const subtopic = asNonEmptyString(entry.subtopic);
-    const itemType = asNonEmptyString(entry.itemType) as StructuredMasterDataItemType | undefined;
+    const content =
+      asNonEmptyString(entry.content) ??
+      asNonEmptyString(entry.excerpt) ??
+      asNonEmptyString(entry.text);
+    const inferredSubtopic =
+      asNonEmptyString(entry.subtopic) ??
+      inferSubtopicFromSourceRef(sourceRef) ??
+      mainTopic ??
+      "General";
+    const subtopic = inferredSubtopic;
+    const itemType =
+      normalizeStructuredItemType(entry.itemType, subtopic) ??
+      inferStructuredItemTypeFromContent(content, subtopic);
     if (!sourceRef || !content || !subtopic || !itemType) {
       continue;
     }
@@ -963,7 +1238,9 @@ function normalizeStructuredItems(
       itemType,
       content,
       sourceRef,
-      date: asNonEmptyString(entry.date),
+      date:
+        asNonEmptyString(entry.date) ??
+        (itemType === "date" ? extractDateFromText(content) : undefined),
       definition: asNonEmptyString(entry.definition),
       person: asNonEmptyString(entry.person),
       term: asNonEmptyString(entry.term)
@@ -971,6 +1248,89 @@ function normalizeStructuredItems(
   }
 
   return normalized;
+}
+
+function normalizeStructuredItemType(
+  value: unknown,
+  subtopic?: string
+): StructuredMasterDataItemType | undefined {
+  const normalized = asNonEmptyString(value)?.toLowerCase();
+  if (!normalized) {
+    return undefined;
+  }
+
+  switch (normalized) {
+    case "fact":
+    case "person":
+    case "date":
+    case "cause":
+    case "event":
+    case "consequence":
+    case "legacy":
+      return normalized;
+    case "key_term":
+    case "key term":
+    case "term":
+      return "key_term";
+    case "process":
+      return inferProcessCompatibilityItemType(subtopic) ?? "fact";
+    default:
+      return undefined;
+  }
+}
+
+function inferProcessCompatibilityItemType(
+  subtopic: string | undefined
+): StructuredMasterDataItemType | undefined {
+  const normalizedSubtopic = normalizePhrase(subtopic ?? "");
+  if (!normalizedSubtopic) {
+    return undefined;
+  }
+
+  if (normalizedSubtopic.includes("cause")) {
+    return "cause";
+  }
+  if (normalizedSubtopic.includes("event")) {
+    return "event";
+  }
+  if (normalizedSubtopic.includes("consequence")) {
+    return "consequence";
+  }
+  if (normalizedSubtopic.includes("legacy")) {
+    return "legacy";
+  }
+
+  return undefined;
+}
+
+function inferStructuredItemTypeFromContent(
+  content: string | undefined,
+  subtopic: string | undefined
+): StructuredMasterDataItemType | undefined {
+  const processType = inferProcessCompatibilityItemType(subtopic);
+  if (processType) {
+    return processType;
+  }
+
+  const date = extractDateFromText(content ?? "");
+  if (date) {
+    return "date";
+  }
+
+  return "fact";
+}
+
+function inferSubtopicFromSourceRef(sourceRef: string | undefined): string | undefined {
+  const cleaned = cleanCompatText(sourceRef);
+  if (!cleaned) {
+    return undefined;
+  }
+
+  const segments = cleaned
+    .split(">")
+    .map((segment) => cleanCompatText(segment))
+    .filter((segment): segment is string => Boolean(segment));
+  return segments.length >= 2 ? segments[segments.length - 2] : undefined;
 }
 
 function buildCompatibleRelayItems(input: {

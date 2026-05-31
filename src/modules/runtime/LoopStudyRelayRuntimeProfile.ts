@@ -3,11 +3,14 @@ export type LoopStudyRelayCapability =
   | "evaluateAssessmentAttempt"
   | "interpretMasterData"
   | "generateInitialAssessment"
+  | "generateLearningLoopBatch"
   | "generatePracticeActivity"
   | "generateStudyPlan";
 
 export interface RelayWorkspacePolicy {
+  allowDirectCommandExecution: boolean;
   allowAgentToAgentDelegation: boolean;
+  allowedCommandNames: string[];
   allowMessageOnlyResponses: boolean;
   allowSupervisorDelegation: boolean;
   allowTaskCreationFromConversation: boolean;
@@ -37,11 +40,29 @@ export interface LoopStudyRelayRuntimeProfile {
   };
 }
 
+type LoopStudyRelayRuntimeProfileInput = Omit<
+  LoopStudyRelayRuntimeProfile,
+  "capabilityRoutes"
+> & {
+  capabilityRoutes: Partial<Record<LoopStudyRelayCapability, LoopStudyRelayCapabilityRoute>>;
+};
+
+export const loopStudyRelayRuntimeCommandNames = {
+  evaluateStructuredResponse: "runtime.evaluate_structured_response",
+  generateStructuredCandidate: "runtime.generate_structured_candidate"
+} as const;
+
+export const loopStudyRelayAllowedCommandNames = [
+  loopStudyRelayRuntimeCommandNames.generateStructuredCandidate,
+  loopStudyRelayRuntimeCommandNames.evaluateStructuredResponse
+] as const;
+
 const loopStudyCapabilityNames: readonly LoopStudyRelayCapability[] = [
   "interpretMasterData",
   "generateInitialAssessment",
   "evaluateAssessmentAttempt",
   "evaluateActiveReviewSession",
+  "generateLearningLoopBatch",
   "generateStudyPlan",
   "generatePracticeActivity"
 ] as const;
@@ -68,6 +89,9 @@ export const defaultLoopStudyRelayRuntimeProfile: LoopStudyRelayRuntimeProfile =
       evaluateActiveReviewSession: {
         agentHandle: "tutor"
       },
+      generateLearningLoopBatch: {
+        agentHandle: "tutor"
+      },
       generateStudyPlan: {
         agentHandle: "tutor"
       },
@@ -78,9 +102,14 @@ export const defaultLoopStudyRelayRuntimeProfile: LoopStudyRelayRuntimeProfile =
     requiredAgentHandles: ["tutor"],
     requiredControllerIds: [],
     requiredSkillIds: [],
-    operatingInstructions: [],
+    operatingInstructions: [
+      `Route ${loopStudyRelayRuntimeCommandNames.generateStructuredCandidate} and ${loopStudyRelayRuntimeCommandNames.evaluateStructuredResponse} to the configured tutor capability routes for loop.study runtime work.`,
+      "Use Relay routing metadata and the to field for dispatch. Do not depend on @mentions embedded in message text."
+    ],
     defaultPolicy: {
       requireApprovalForSideEffects: [],
+      allowDirectCommandExecution: true,
+      allowedCommandNames: [...loopStudyRelayAllowedCommandNames],
       allowTaskCreationFromConversation: true,
       allowMessageOnlyResponses: true,
       allowSupervisorDelegation: false,
@@ -89,7 +118,7 @@ export const defaultLoopStudyRelayRuntimeProfile: LoopStudyRelayRuntimeProfile =
   });
 
 export function createLoopStudyRelayRuntimeProfile(
-  input: LoopStudyRelayRuntimeProfile
+  input: LoopStudyRelayRuntimeProfileInput
 ): LoopStudyRelayRuntimeProfile {
   const defaultAgentHandle = normalizeRequiredValue(
     input.defaultAgentHandle,
@@ -130,6 +159,8 @@ export function createLoopStudyRelayRuntimeProfile(
     ),
     defaultPolicy: {
       requireApprovalForSideEffects: [...input.defaultPolicy.requireApprovalForSideEffects],
+      allowDirectCommandExecution: input.defaultPolicy.allowDirectCommandExecution,
+      allowedCommandNames: [...input.defaultPolicy.allowedCommandNames],
       allowTaskCreationFromConversation: input.defaultPolicy.allowTaskCreationFromConversation,
       allowMessageOnlyResponses: input.defaultPolicy.allowMessageOnlyResponses,
       allowSupervisorDelegation: input.defaultPolicy.allowSupervisorDelegation,
@@ -171,10 +202,10 @@ export function createLoopStudyRelayRuntimeProfileFromUnknown(
       typeof profile.defaultControllerId === "string"
         ? profile.defaultControllerId
         : undefined,
-    capabilityRoutes: profile.capabilityRoutes as Record<
+    capabilityRoutes: profile.capabilityRoutes as Partial<Record<
       LoopStudyRelayCapability,
       LoopStudyRelayCapabilityRoute
-    >,
+    >>,
     requiredAgentHandles: Array.isArray(profile.requiredAgentHandles)
       ? profile.requiredAgentHandles.map(String)
       : [],
@@ -188,9 +219,16 @@ export function createLoopStudyRelayRuntimeProfileFromUnknown(
       ? profile.operatingInstructions.map(String)
       : [],
     defaultPolicy: {
+      allowDirectCommandExecution:
+        profile.defaultPolicy.allowDirectCommandExecution !== undefined
+          ? Boolean(profile.defaultPolicy.allowDirectCommandExecution)
+          : true,
       allowAgentToAgentDelegation: Boolean(
         profile.defaultPolicy.allowAgentToAgentDelegation
       ),
+      allowedCommandNames: Array.isArray(profile.defaultPolicy.allowedCommandNames)
+        ? profile.defaultPolicy.allowedCommandNames.map(String)
+        : [...loopStudyRelayAllowedCommandNames],
       allowMessageOnlyResponses: Boolean(
         profile.defaultPolicy.allowMessageOnlyResponses
       ),
@@ -285,6 +323,16 @@ export function withLegacyRelayCompatibilityOverrides(
             ? nextDefaultAgentHandle
             : profile.capabilityRoutes.evaluateActiveReviewSession.agentHandle)
       },
+      generateLearningLoopBatch: {
+        ...profile.capabilityRoutes.generateLearningLoopBatch,
+        agentHandle:
+          normalizeOptionalValue(overrides.studyPlanAgentHandle) ??
+          normalizeOptionalValue(overrides.reviewAgentHandle) ??
+          (profile.capabilityRoutes.generateLearningLoopBatch.agentHandle ===
+          profile.defaultAgentHandle
+            ? nextDefaultAgentHandle
+            : profile.capabilityRoutes.generateLearningLoopBatch.agentHandle)
+      },
       generateStudyPlan: {
         ...profile.capabilityRoutes.generateStudyPlan,
         agentHandle:
@@ -308,18 +356,13 @@ export function withLegacyRelayCompatibilityOverrides(
 }
 
 function createCapabilityRoutes(
-  input: Record<LoopStudyRelayCapability, LoopStudyRelayCapabilityRoute>,
+  input: Partial<Record<LoopStudyRelayCapability, LoopStudyRelayCapabilityRoute>>,
   defaultAgentHandle: string
 ): Record<LoopStudyRelayCapability, LoopStudyRelayCapabilityRoute> {
   const routes = {} as Record<LoopStudyRelayCapability, LoopStudyRelayCapabilityRoute>;
 
   for (const capability of loopStudyCapabilityNames) {
-    const route = input[capability];
-    if (!route) {
-      throw new Error(
-        `Loop study Relay runtime profile must define capability route ${capability}.`
-      );
-    }
+    const route = input[capability] ?? { agentHandle: defaultAgentHandle };
 
     routes[capability] = {
       agentHandle:

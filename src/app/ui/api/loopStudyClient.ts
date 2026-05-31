@@ -3,6 +3,7 @@ import type {
   InitialAssessmentResponse
 } from "../../../domain/study/AssessmentGeneration.js";
 import type { LearningLoopResumeResponse } from "../../../domain/study/LearningLoops.js";
+import type { InitialLoopBatchResponse } from "../../../domain/study/LoopStart.js";
 import type {
   MasterDataUploadResponse,
   UploadMasterDataCommand
@@ -57,6 +58,25 @@ export async function generateInitialAssessment(
   }
 ): Promise<InitialAssessmentResponse> {
   return requestJson<InitialAssessmentResponse>(`${apiBaseUrl}/v1/assessments/initial`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json"
+    },
+    body: JSON.stringify(command)
+  });
+}
+
+export async function startLearningLoop(
+  apiBaseUrl: string,
+  command: {
+    desiredLoopCount: number;
+    learnerName: string;
+    objective: string;
+    topic: string;
+    yearGroup: string;
+  }
+): Promise<InitialLoopBatchResponse> {
+  return requestJson<InitialLoopBatchResponse>(`${apiBaseUrl}/v1/learning-loops/start`, {
     method: "POST",
     headers: {
       "content-type": "application/json"

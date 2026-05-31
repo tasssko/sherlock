@@ -19,6 +19,31 @@ export interface LoopSetupFormProps {
   onValuesChange: (nextValues: LoopSetupValues) => void;
 }
 
+type LoopPace = "quick" | "standard" | "deep";
+
+function deriveLoopPace(questionCount: number): LoopPace {
+  if (questionCount <= 2) {
+    return "quick";
+  }
+
+  if (questionCount <= 4) {
+    return "standard";
+  }
+
+  return "deep";
+}
+
+function loopCountForPace(pace: LoopPace): number {
+  switch (pace) {
+    case "quick":
+      return 2;
+    case "standard":
+      return 4;
+    case "deep":
+      return 6;
+  }
+}
+
 export function LoopSetupForm(props: LoopSetupFormProps) {
   const { demoTopics, onApplyDemoSeed, values, onMinutesChange, onValuesChange } = props;
 
@@ -95,23 +120,24 @@ export function LoopSetupForm(props: LoopSetupFormProps) {
 
         <div className="inline-grid">
           <label>
-            Assessment questions
-            <input
-              type="number"
-              min={1}
-              max={10}
-              value={values.questionCount}
+            Round pace
+            <select
+              value={deriveLoopPace(values.questionCount)}
               onChange={(event) =>
                 onValuesChange({
                   ...values,
-                  questionCount: Number(event.target.value) || 1
+                  questionCount: loopCountForPace(event.target.value as LoopPace)
                 })
               }
-            />
+            >
+              <option value="quick">Quick</option>
+              <option value="standard">Standard</option>
+              <option value="deep">Deep</option>
+            </select>
           </label>
 
           <label>
-            Flashcards
+            Review set size
             <input
               type="number"
               min={1}

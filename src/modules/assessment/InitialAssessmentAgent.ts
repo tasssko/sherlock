@@ -44,7 +44,13 @@ export function validateAssessmentArtifact(
 export function createAssessmentArtifactContent(input: {
   topic: string;
   questionCount: number;
-  items: readonly { id: string; prompt: string; difficulty: "easy" | "medium" | "stretch" }[];
+  items: readonly {
+    id: string;
+    prompt: string;
+    difficulty: "easy" | "medium" | "stretch";
+    questionType?: "free_form" | "multiple_choice" | "multiple_select";
+    hint?: string;
+  }[];
 }): AssessmentArtifactContent {
   return {
     topic: input.topic,

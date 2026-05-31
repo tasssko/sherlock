@@ -113,9 +113,9 @@ describe("loop.study to Relay structured conversation bridge", () => {
       const interpretationMessage = fakeRelay.messages[0];
       expect(interpretationMessage?.to).toBe("@tutor");
       expect(interpretationMessage?.content.type).toBe("command");
-      expect(interpretationMessage?.content.name).toBe("loop_study.interpret_master_data");
+      expect(interpretationMessage?.content.name).toBe("runtime.generate_structured_candidate");
       expect(interpretationMessage?.content.inputSchema).toBe(
-        "LoopStudyInterpretMasterDataInput.v1"
+        "RuntimeGenerateStructuredCandidateInput.v1"
       );
       expect(interpretationMessage?.content.expectedOutputSchema).toBe(
         "MasterDataInterpretationCandidate.v1"
@@ -131,13 +131,19 @@ describe("loop.study to Relay structured conversation bridge", () => {
         expectedOutputSchema: "MasterDataInterpretationCandidate.v1"
       });
       const interpretationPayload = parseLoopStudyCommandContent(
-        interpretationMessage?.content ?? { type: "text", text: "" }
+        interpretationMessage?.content ?? { type: "text", text: "" },
+        interpretationMessage?.metadata
       ).packet.payload as {
+        candidateKind?: string;
         outputContract?: Record<string, unknown>;
+        purpose?: string;
+        qualityRules?: string[];
         rawSourceContent?: string;
         sourceId?: string;
         sourceName?: string;
       };
+      expect(interpretationPayload.candidateKind).toBe("master_data_interpretation");
+      expect(interpretationPayload.purpose).toContain("Interpret uploaded study material");
       expect(interpretationPayload.sourceName).toBe("Year 7 Geography: Coasts");
       expect(interpretationPayload.sourceId).toContain("upload:");
       expect(interpretationPayload.rawSourceContent).toContain("COASTS");
@@ -174,6 +180,11 @@ describe("loop.study to Relay structured conversation bridge", () => {
           "Return schema exactly as MasterDataInterpretationCandidate.v1.",
           "learningObjectives must be objects with id, objective, and sourceRefs; do not return strings.",
           "Use empty arrays, not null or omitted fields, when keyPeople, importantDates, or processes are absent."
+        ])
+      );
+      expect(interpretationPayload.qualityRules).toEqual(
+        expect.arrayContaining([
+          "Return schema exactly as MasterDataInterpretationCandidate.v1."
         ])
       );
       expect(
@@ -213,9 +224,7 @@ describe("loop.study to Relay structured conversation bridge", () => {
       const assessmentMessage = fakeRelay.messages[1];
       expect(assessmentMessage?.to).toBe("@tutor");
       expect(assessmentMessage?.content.type).toBe("command");
-      expect(assessmentMessage?.content.name).toBe(
-        "loop_study.generate_initial_assessment"
-      );
+      expect(assessmentMessage?.content.name).toBe("runtime.generate_structured_candidate");
       expect(String(assessmentMessage?.content.previewText ?? "")).not.toContain("@supervisor");
       expect(String(assessmentMessage?.content.previewText ?? "")).not.toContain("@agent");
       expect(assessmentMessage?.metadata).toMatchObject({
@@ -230,18 +239,47 @@ describe("loop.study to Relay structured conversation bridge", () => {
       );
 
       const initialPacket = parseLoopStudyCommandContent(
-        assessmentMessage?.content ?? { type: "text", text: "" }
+        assessmentMessage?.content ?? { type: "text", text: "" },
+        assessmentMessage?.metadata
       ).packet.payload as {
+        candidateKind?: string;
         materialInterpretation?: Record<string, unknown>;
+        qualityRules?: string[];
         relevantSourceExcerpts: Array<Record<string, unknown>>;
         source?: Record<string, unknown>;
         topic?: string;
       };
+      expect(initialPacket.candidateKind).toBe("initial_assessment");
       expect(initialPacket.materialInterpretation).toMatchObject({
-        subject: "Geography",
-        yearGroup: "Year 7",
+        detectedSubject: "Geography",
+        detectedYearGroup: "Year 7",
         mainTopic: "Coasts"
       });
+      expect(
+        Array.isArray(initialPacket.materialInterpretation?.learningObjectives) &&
+          initialPacket.materialInterpretation.learningObjectives.length > 0
+      ).toBe(true);
+      expect(
+        Array.isArray(initialPacket.materialInterpretation?.keyTerms) &&
+          initialPacket.materialInterpretation.keyTerms.length > 0
+      ).toBe(true);
+      expect(
+        Array.isArray(initialPacket.materialInterpretation?.processes) &&
+          initialPacket.materialInterpretation.processes.length > 0
+      ).toBe(true);
+      expect(
+        Array.isArray(initialPacket.materialInterpretation?.sourceMap) &&
+          initialPacket.materialInterpretation.sourceMap.length > 0
+      ).toBe(true);
+      expect(
+        Array.isArray(initialPacket.materialInterpretation?.items) &&
+          initialPacket.materialInterpretation.items.length > 0
+      ).toBe(true);
+      expect(initialPacket.qualityRules).toEqual(
+        expect.arrayContaining([
+          "Ground every generated question in the accepted interpretation and provided source evidence."
+        ])
+      );
       expect(initialPacket.topic).toBe("Coasts");
       expect(initialPacket.source?.rawSourceContent).toContain("COASTS");
       expect(initialPacket.relevantSourceExcerpts.length).toBeGreaterThan(0);
@@ -259,6 +297,8 @@ describe("loop.study to Relay structured conversation bridge", () => {
           String(item.excerpt ?? "").includes("What should you remember about The")
         )
       ).toBe(false);
+      expect(JSON.stringify(initialPacket)).not.toContain("\"canonicalAnswer\"");
+      expect(JSON.stringify(initialPacket)).not.toContain("\"sourceItems\"");
 
       const attemptResponse = await server.inject({
         method: "POST",
@@ -293,15 +333,34 @@ describe("loop.study to Relay structured conversation bridge", () => {
         }
       });
       expect(studyPlanResponse.statusCode).toBe(201);
-      const studyPlanMessage = fakeRelay.messages[3];
-      expect(studyPlanMessage?.content.type).toBe("command");
-      expect(studyPlanMessage?.content.name).toBe("loop_study.generate_study_plan");
-      const studyPlanPacket = parseLoopStudyCommandContent(
-        studyPlanMessage?.content ?? { type: "text", text: "" }
+      const loopBatchMessage = fakeRelay.messages[3];
+      const loopBatchPacket = parseLoopStudyCommandContent(
+        loopBatchMessage?.content ?? { type: "text", text: "" },
+        loopBatchMessage?.metadata
       ).packet.payload as {
+        candidateKind?: string;
+        materialInterpretation?: Record<string, unknown>;
+      };
+      expect(loopBatchMessage?.to).toBe("@tutor");
+      expect(loopBatchPacket.candidateKind).toBe("learning_loop_batch");
+      expect(loopBatchPacket.materialInterpretation).toMatchObject({
+        mainTopic: "Coasts",
+        detectedSubject: "Geography",
+        detectedYearGroup: "Year 7"
+      });
+
+      const studyPlanMessage = fakeRelay.messages[4];
+      expect(studyPlanMessage?.content.type).toBe("command");
+      expect(studyPlanMessage?.content.name).toBe("runtime.generate_structured_candidate");
+      const studyPlanPacket = parseLoopStudyCommandContent(
+        studyPlanMessage?.content ?? { type: "text", text: "" },
+        studyPlanMessage?.metadata
+      ).packet.payload as {
+        candidateKind?: string;
         materialInterpretations?: Array<Record<string, unknown>>;
       };
       expect(studyPlanMessage?.to).toBe("@tutor");
+      expect(studyPlanPacket.candidateKind).toBe("study_plan");
       expect(studyPlanPacket.materialInterpretations?.[0]).toMatchObject({
         mainTopic: "Coasts",
         subject: "Geography",
@@ -322,7 +381,7 @@ describe("loop.study to Relay structured conversation bridge", () => {
       });
       expect(practiceResponse.statusCode).toBe(201);
 
-      expect(fakeRelay.messages).toHaveLength(5);
+      expect(fakeRelay.messages).toHaveLength(6);
       const conversationIds = new Set(
         fakeRelay.messages.map((message) => message.conversationId)
       );
@@ -330,10 +389,12 @@ describe("loop.study to Relay structured conversation bridge", () => {
 
       const practiceMessage = fakeRelay.messages.at(-1);
       expect(practiceMessage?.content.type).toBe("command");
-      expect(practiceMessage?.content.name).toBe("loop_study.generate_practice_activity");
+      expect(practiceMessage?.content.name).toBe("runtime.generate_structured_candidate");
       const practicePacket = parseLoopStudyCommandContent(
-        practiceMessage?.content ?? { type: "text", text: "" }
+        practiceMessage?.content ?? { type: "text", text: "" },
+        practiceMessage?.metadata
       ).packet.payload as {
+        candidateKind?: string;
         learningObjectives: readonly string[];
         materialInterpretation?: Record<string, unknown>;
         selectedSourceEvidence: Array<Record<string, unknown>>;
@@ -343,6 +404,7 @@ describe("loop.study to Relay structured conversation bridge", () => {
         yearGroup?: string;
       };
       expect(practiceMessage?.to).toBe("@tutor");
+      expect(practicePacket.candidateKind).toBe("practice_activity");
       expect(practicePacket.subject).toBe("Geography");
       expect(practicePacket.yearGroup).toBe("Year 7");
       expect(practicePacket.topic).toBe("Coasts");
@@ -384,7 +446,7 @@ describe("loop.study to Relay structured conversation bridge", () => {
       expect(
         record?.record.runtimeConversationBindings[0]?.relayConversationId
       ).toBe(fakeRelay.messages[1]?.conversationId);
-      expect(record?.record.runtimeTraces).toHaveLength(4);
+      expect(record?.record.runtimeTraces).toHaveLength(5);
       expect(
         record?.record.runtimeTraces.every((trace) => {
           const snapshot = trace.toSnapshot();

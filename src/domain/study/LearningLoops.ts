@@ -21,6 +21,7 @@ import type { TaskSnapshot } from "../primitives/Task.js";
 import type { WorkPlanSnapshot } from "../primitives/WorkPlan.js";
 import type { WorkspaceSnapshot } from "../primitives/Workspace.js";
 import type { LearningLoopRouteProjection } from "./NextAction.js";
+import type { LearningLoopBatchSnapshot } from "./LoopBatches.js";
 import type { StudyPlanArtifactContent } from "./StudyPlanning.js";
 
 export interface ResumableStudyPlanProjection {
@@ -41,6 +42,7 @@ export interface LearningLoopResumeResponse extends LearningLoopRouteProjection 
   knowledgeGaps: readonly KnowledgeGapSnapshot[];
   masteryProfile?: MasteryProfileSnapshot;
   studyPlan?: ResumableStudyPlanProjection;
+  loopBatch?: LearningLoopBatchSnapshot;
   practiceActivities: readonly PracticeActivitySnapshot[];
   currentPracticeActivity?: PracticeActivitySnapshot;
   latestActiveReviewSession?: ActiveReviewSessionSnapshot;

@@ -1,12 +1,13 @@
 import type { RuntimeTraceId } from "../../domain/primitives/ids.js";
 import { createRuntimeTraceId } from "../../domain/primitives/ids.js";
 
-export type RuntimeProvider = "fixture" | "relay";
+export type RuntimeProvider = "fixture" | "openai" | "relay";
 export type RuntimeOperation =
   | "evaluateActiveReviewSession"
   | "evaluateAssessmentAttempt"
   | "interpretMasterData"
   | "generateInitialAssessment"
+  | "generateLearningLoopBatch"
   | "generatePracticeActivity"
   | "generateStudyPlan";
 

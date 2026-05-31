@@ -12,11 +12,13 @@ import type { AgentRuntime } from "../runtime/AgentRuntime.js";
 import { FixtureAgentRuntime } from "../runtime/FixtureAgentRuntime.js";
 import { appendSucceededRuntimeTrace } from "../runtime/RuntimeTraceLedger.js";
 import { upsertRuntimeConversationBinding } from "../runtime/RuntimeConversationBinding.js";
+import { LearningLoopSelector } from "../learning/LearningLoopSelector.js";
 
 export class StudyPlanController
   implements Controller<CreateStudyPlanCommand, StudyPlanResponse>
 {
   private readonly service: StudyPlanGenerationService;
+  private readonly loopSelector = new LearningLoopSelector();
 
   constructor(
     private readonly repository: LearningLoopRepository,
@@ -30,13 +32,14 @@ export class StudyPlanController
   async execute(command: CreateStudyPlanCommand): Promise<Result<StudyPlanResponse>> {
     const repositoryKey = LearnerWorkspaceKey.fromCommand(command);
     const existingRecord = this.repository.findRecord(repositoryKey);
+    const selectedLoop = this.loopSelector.findByTopic(
+      existingRecord,
+      command.focusTopics[0] ?? "study"
+    );
     const aggregate = await this.service.run({
       command,
       existingRecord,
-      materialInterpretations: existingRecord?.learningLoops
-        .find((candidate) => candidate.topic === (command.focusTopics[0] ?? "study"))
-        ?.toSnapshot()
-        .sourceIds.flatMap((sourceId) => {
+      materialInterpretations: selectedLoop?.toSnapshot().sourceIds.flatMap((sourceId) => {
           const source = this.repository.findMasterDataSourcesByIds([sourceId])[0];
           return source?.acceptedInterpretation ? [source.acceptedInterpretation] : [];
         })
@@ -81,6 +84,7 @@ export class StudyPlanController
         ,
         practiceActivities: [...(existingRecord?.practiceActivities ?? [])],
         activeReviewSessions: [...(existingRecord?.activeReviewSessions ?? [])],
+        loopBatches: [...(existingRecord?.loopBatches ?? [])],
         runtimeConversationBindings: upsertRuntimeConversationBinding(
           existingRecord?.runtimeConversationBindings ?? [],
           aggregate.value.runtimeConversationBinding

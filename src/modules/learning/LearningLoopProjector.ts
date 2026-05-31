@@ -1,5 +1,6 @@
 import type { ActiveReviewSession } from "../../domain/learning/ActiveReviewSession.js";
 import type { Assessment, Attempt, Evaluation } from "../../domain/learning/Assessment.js";
+import type { LearningLoopBatch } from "../../domain/learning/LearningLoopBatch.js";
 import type {
   KnowledgeGap,
   LearningLoop,
@@ -33,6 +34,7 @@ export interface LearningLoopResumeAggregate {
     tasks: readonly Task[];
     workPlan: WorkPlan;
   };
+  loopBatch?: LearningLoopBatch;
   practiceActivities: readonly PracticeActivity[];
   currentPracticeActivity?: PracticeActivity;
   latestActiveReviewSession?: ActiveReviewSession;
@@ -60,6 +62,7 @@ export class LearningLoopProjector {
       nextAction: this.nextActionProjector.project({
         learningLoop: aggregate.learningLoop,
         assessmentId: aggregate.currentAssessment?.id,
+        loopBatch: aggregate.loopBatch,
         practiceActivityId: aggregate.currentPracticeActivity?.id,
         workPlanId: aggregate.studyPlan?.workPlan.id
       }),
@@ -71,6 +74,7 @@ export class LearningLoopProjector {
       latestEvaluation: aggregate.latestEvaluation?.toSnapshot(),
       knowledgeGaps: aggregate.knowledgeGaps.map((gap) => gap.toSnapshot()),
       masteryProfile: aggregate.masteryProfile?.toSnapshot(),
+      loopBatch: aggregate.loopBatch?.toSnapshot(),
       studyPlan:
         aggregate.studyPlan && taskGraph
           ? {

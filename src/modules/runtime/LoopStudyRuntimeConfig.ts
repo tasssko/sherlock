@@ -9,10 +9,17 @@ import {
 
 export interface LoopStudyRuntimeEnvironment {
   LOOP_STUDY_AGENT_RUNTIME?: string;
+  LOOP_STUDY_INTELLIGENCE?: string;
+  LOOP_STUDY_OPENAI_API_KEY?: string;
+  LOOP_STUDY_OPENAI_BASE_URL?: string;
+  LOOP_STUDY_OPENAI_MODEL?: string;
   LOOP_STUDY_RELAY_API_URL?: string;
   LOOP_STUDY_RELAY_PROFILE?: string;
   LOOP_STUDY_RELAY_TEMPLATE_PATH?: string;
   LOOP_STUDY_RELAY_WORKSPACE_ID?: string;
+  OPENAI_API_KEY?: string;
+  OPENAI_BASE_URL?: string;
+  OPENAI_MODEL?: string;
   RELAY_API_URL?: string;
   RELAY_ASSESSMENT_AGENT_HANDLE?: string;
   RELAY_CONTROLLER_ID?: string;
@@ -26,11 +33,16 @@ export interface LoopStudyRuntimeEnvironment {
 
 export interface LoopStudyRuntimeConfig {
   compatibilityWarnings: readonly string[];
+  openai?: {
+    apiKey: string;
+    baseUrl: string;
+    model: string;
+  };
   relay?: {
     baseUrl: string;
     profile: LoopStudyRelayRuntimeProfile;
   };
-  runtimeMode: "fixture" | "relay";
+  runtimeMode: "fixture" | "openai" | "relay";
 }
 
 interface LoopStudyRuntimeConfigOptions {
@@ -44,18 +56,24 @@ export function loadLoopStudyRuntimeConfig(
   const compatibilityWarnings: string[] = [];
   const runtimeMode = readRuntimeMode(environment, compatibilityWarnings);
 
-  if (runtimeMode !== "relay") {
+  if (runtimeMode === "fixture") {
     return {
       runtimeMode: "fixture",
       compatibilityWarnings
     };
   }
 
+  if (runtimeMode === "openai") {
+    return {
+      runtimeMode: "openai",
+      compatibilityWarnings,
+      openai: readOpenAIConfig(environment)
+    };
+  }
+
   const baseUrl = readRelayBaseUrl(environment, compatibilityWarnings);
   if (!baseUrl) {
-    throw new Error(
-      "Relay runtime requires LOOP_STUDY_RELAY_API_URL to be set."
-    );
+    throw new Error("Experimental Relay mode requires LOOP_STUDY_RELAY_API_URL to be set.");
   }
 
   const profile = readRelayProfile(environment, options.readTextFile, compatibilityWarnings);
@@ -70,6 +88,33 @@ export function loadLoopStudyRuntimeConfig(
   };
 }
 
+function readOpenAIConfig(environment: LoopStudyRuntimeEnvironment): {
+  apiKey: string;
+  baseUrl: string;
+  model: string;
+} {
+  const apiKey =
+    normalizeOptionalValue(environment.LOOP_STUDY_OPENAI_API_KEY) ??
+    normalizeOptionalValue(environment.OPENAI_API_KEY);
+  if (!apiKey) {
+    throw new Error(
+      "OpenAI intelligence requires OPENAI_API_KEY or LOOP_STUDY_OPENAI_API_KEY to be set."
+    );
+  }
+
+  return {
+    apiKey,
+    baseUrl:
+      normalizeOptionalValue(environment.LOOP_STUDY_OPENAI_BASE_URL) ??
+      normalizeOptionalValue(environment.OPENAI_BASE_URL) ??
+      "https://api.openai.com/v1",
+    model:
+      normalizeOptionalValue(environment.LOOP_STUDY_OPENAI_MODEL) ??
+      normalizeOptionalValue(environment.OPENAI_MODEL) ??
+      "gpt-4.1-mini"
+  };
+}
+
 function readRelayBaseUrl(
   environment: LoopStudyRuntimeEnvironment,
   compatibilityWarnings: string[]
@@ -81,9 +126,7 @@ function readRelayBaseUrl(
 
   const legacyValue = normalizeOptionalValue(environment.RELAY_API_URL);
   if (legacyValue) {
-    compatibilityWarnings.push(
-      "RELAY_API_URL is deprecated. Use LOOP_STUDY_RELAY_API_URL."
-    );
+    compatibilityWarnings.push("RELAY_API_URL is deprecated. Use LOOP_STUDY_RELAY_API_URL.");
   }
 
   return legacyValue;
@@ -169,9 +212,7 @@ function readBuiltinProfile(profileId: string): LoopStudyRelayRuntimeProfile {
     return defaultLoopStudyRelayRuntimeProfile;
   }
 
-  throw new Error(
-    `Unknown loop.study Relay runtime profile ${profileId}.`
-  );
+  throw new Error(`Unknown experimental loop.study Relay runtime profile ${profileId}.`);
 }
 
 function readDeprecatedValue(
@@ -204,27 +245,37 @@ function readLegacyWorkspaceId(
 function readRuntimeMode(
   environment: LoopStudyRuntimeEnvironment,
   compatibilityWarnings: string[]
-): "fixture" | "relay" {
-  const loopStudyValue = normalizeOptionalValue(environment.LOOP_STUDY_AGENT_RUNTIME);
-  if (loopStudyValue === "relay") {
+): "fixture" | "openai" | "relay" {
+  const explicit = normalizeOptionalValue(environment.LOOP_STUDY_INTELLIGENCE);
+  if (explicit === "fixture" || explicit === "openai" || explicit === "relay") {
+    return explicit;
+  }
+
+  if (explicit) {
+    throw new Error(`Unsupported LOOP_STUDY_INTELLIGENCE value ${explicit}.`);
+  }
+
+  const legacyLoopStudyValue = normalizeOptionalValue(environment.LOOP_STUDY_AGENT_RUNTIME);
+  if (legacyLoopStudyValue) {
+    compatibilityWarnings.push(
+      "LOOP_STUDY_AGENT_RUNTIME is deprecated. Use LOOP_STUDY_INTELLIGENCE."
+    );
+    if (legacyLoopStudyValue === "fixture" || legacyLoopStudyValue === "relay") {
+      return legacyLoopStudyValue;
+    }
+
+    throw new Error(`Unsupported LOOP_STUDY_AGENT_RUNTIME value ${legacyLoopStudyValue}.`);
+  }
+
+  const legacySherlockValue = normalizeOptionalValue(environment.SHERLOCK_AGENT_RUNTIME);
+  if (legacySherlockValue === "relay") {
+    compatibilityWarnings.push(
+      "SHERLOCK_AGENT_RUNTIME is deprecated. Use LOOP_STUDY_INTELLIGENCE=relay."
+    );
     return "relay";
   }
 
-  if (loopStudyValue === "fixture" || loopStudyValue === undefined) {
-    const legacyValue = normalizeOptionalValue(environment.SHERLOCK_AGENT_RUNTIME);
-    if (legacyValue === "relay") {
-      compatibilityWarnings.push(
-        "SHERLOCK_AGENT_RUNTIME is deprecated. Use LOOP_STUDY_AGENT_RUNTIME."
-      );
-      return "relay";
-    }
-
-    return "fixture";
-  }
-
-  throw new Error(
-    `Unsupported LOOP_STUDY_AGENT_RUNTIME value ${loopStudyValue}.`
-  );
+  return "fixture";
 }
 
 function normalizeOptionalValue(value: string | undefined): string | undefined {

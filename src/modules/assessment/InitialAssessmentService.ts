@@ -12,6 +12,7 @@ import { MasterDataSourceSelector } from "./MasterDataSourceSelector.js";
 import { WorkspaceAssessmentAssembler } from "./WorkspaceAssessmentAssembler.js";
 import { FixtureAgentRuntime } from "../runtime/FixtureAgentRuntime.js";
 import { appendSucceededRuntimeTrace } from "../runtime/RuntimeTraceLedger.js";
+import { createLearningLoopRecord } from "../planning/LearningLoopRepository.js";
 
 export interface InitialAssessmentServiceResult {
   aggregate: InitialAssessmentAggregate;
@@ -48,15 +49,31 @@ export class InitialAssessmentService {
         activeObjective: `Diagnose and improve ${command.topic}.`
       });
     const events = createDomainEventRecorder(workspace.id);
-    const learningLoop =
-      this.loopSelector.findByTopic(record, command.topic) ??
-      this.loopSelector.createForInitialAssessment({
+    let effectiveRecord = record;
+    let learningLoop = this.loopSelector.findByTopic(record, command.topic);
+
+    if (record) {
+      const reconciledLoops = this.loopSelector.reconcileTopicLoops(
+        record,
+        command.topic,
+        learningLoop?.id,
+        events
+      );
+      effectiveRecord = createLearningLoopRecord({
+        ...record,
+        learningLoops: reconciledLoops
+      });
+    }
+
+    if (!learningLoop) {
+      learningLoop = this.loopSelector.createForInitialAssessment({
         objective: `Build secure understanding in ${command.topic}.`,
         topic: command.topic,
         workspace,
         events,
         sourceIds: [sourceSelection.value.source.id]
       });
+    }
     const context = InitialAssessmentContext.create({
       command,
       sourceName: sourceSelection.value.source.name
@@ -66,7 +83,7 @@ export class InitialAssessmentService {
       context,
       events,
       learningLoop,
-      runtimeConversationBinding: record?.runtimeConversationBindings.find(
+      runtimeConversationBinding: effectiveRecord?.runtimeConversationBindings.find(
         (binding) => binding.learningLoopId === learningLoop.id
       ),
       source: sourceSelection.value.source,
@@ -81,7 +98,7 @@ export class InitialAssessmentService {
     const completedTask = this.taskAssembler.complete(
       task,
       assembled.value.artifact.id,
-      `${command.topic} initial assessment with ${command.questionCount} items.`,
+      `${command.topic} initial assessment with ${assembled.value.assessment.items.length} items.`,
       events
     );
     if (!completedTask.ok) {
@@ -94,7 +111,7 @@ export class InitialAssessmentService {
       assessment: assembled.value.assessment,
       events,
       learningLoop,
-      record,
+      record: effectiveRecord,
       runtimeConversationBinding: assembled.value.runtimeConversationBinding,
       runtimeTrace: assembled.value.runtimeTrace,
       task: completedTask.value,

@@ -1,4 +1,9 @@
-import type { AssessmentItem, EvaluationItemResult } from "../../domain/learning/Assessment.js";
+import type {
+  AssessmentItem,
+  AssessmentQuestionType,
+  AssessmentOption,
+  EvaluationItemResult
+} from "../../domain/learning/Assessment.js";
 import type { MasterDataItem, MasterDataSource } from "../../domain/learning/MasterData.js";
 import type {
   FlashcardSet,
@@ -17,6 +22,7 @@ import type {
   AgentRuntime,
   AssessmentAttemptEvaluationCandidate,
   InitialAssessmentGenerationCandidate,
+  LearningLoopBatchGenerationCandidate,
   MasterDataInterpretationResultCandidate,
   PracticeActivityGenerationCandidate,
   StudyPlanGenerationCandidate
@@ -44,6 +50,57 @@ function normalize(value: string): string {
     .trim();
 }
 
+function buildRecallAnchor(item: MasterDataItem): string {
+  return item.person ?? item.term ?? item.date ?? item.subtopic ?? item.topic;
+}
+
+function isGenericRecallPrompt(prompt: string): boolean {
+  const normalized = normalize(prompt);
+  return (
+    normalized.startsWith("what should you remember about ") ||
+    normalized.startsWith("what is one key fact from ")
+  );
+}
+
+function buildSpecificRecallPrompt(item: MasterDataItem, mode: "assessment" | "practice"): string {
+  const context = item.subtopic ?? item.topic;
+  const anchor = buildRecallAnchor(item);
+
+  switch (item.itemType) {
+    case "person":
+      return `Who was ${item.person ?? anchor}?`;
+    case "key_term":
+      return mode === "practice"
+        ? `Define ${item.term ?? anchor} in your own words.`
+        : `What does ${item.term ?? anchor} mean?`;
+    case "date":
+      return mode === "practice"
+        ? `Why does ${item.date ?? anchor} matter in ${context}?`
+        : `What happened in ${item.date ?? anchor}?`;
+    case "cause":
+      return `What caused ${context}?`;
+    case "event":
+      return anchor && normalize(anchor) !== normalize(context)
+        ? `What happened to ${anchor} in ${context}?`
+        : `What happened in ${context}?`;
+    case "consequence":
+      return `What was one consequence of ${context}?`;
+    case "legacy":
+      return `What legacy did ${context} leave behind?`;
+    case "fact":
+    default:
+      if (anchor && normalize(anchor) !== normalize(context) && normalize(anchor) !== normalize(item.topic)) {
+        return mode === "practice"
+          ? `Explain how ${anchor} relates to ${context}.`
+          : `How does ${anchor} help explain ${context}?`;
+      }
+
+      return mode === "practice"
+        ? `Explain one key idea about ${context} in your own words.`
+        : `Explain one key idea about ${context}.`;
+  }
+}
+
 function pickSourceSentence(item: MasterDataItem): string {
   if (item.content) {
     return item.content;
@@ -63,27 +120,258 @@ function pickSourceSentence(item: MasterDataItem): string {
 }
 
 function buildAssessmentPrompt(item: MasterDataItem): string {
-  return item.sourceRef ? `${item.prompt} [Source: ${item.sourceRef}]` : item.prompt;
+  const prompt = isGenericRecallPrompt(item.prompt)
+    ? buildSpecificRecallPrompt(item, "assessment")
+    : item.prompt;
+
+  return item.sourceRef ? `${prompt} [Source: ${item.sourceRef}]` : prompt;
+}
+
+function buildHint(item: MasterDataItem): string {
+  const fact = item.content ?? item.canonicalAnswer;
+  const sourceRef = item.sourceRef ? ` (${item.sourceRef})` : "";
+  return `Hint${sourceRef}: ${fact}`;
+}
+
+function extractSelectablePhrases(value?: string): string[] {
+  if (!value) {
+    return [];
+  }
+
+  return value
+    .split(/,|;|\band\b|\bor\b/gi)
+    .map((part) => part.trim())
+    .filter((part) => part.length > 2);
+}
+
+function deriveAnswerText(item: {
+  canonicalAnswer?: string;
+  content?: string;
+  date?: string;
+  definition?: string;
+  person?: string;
+  subtopic?: string;
+  term?: string;
+  topic: string;
+}): string {
+  return (
+    item.canonicalAnswer ??
+    item.definition ??
+    item.person ??
+    item.date ??
+    item.term ??
+    item.content ??
+    item.subtopic ??
+    item.topic
+  );
+}
+
+function shuffleSeeded<T>(values: readonly T[], seed: string): T[] {
+  const next = [...values];
+  let state = Array.from(seed).reduce((total, character) => total + character.charCodeAt(0), 0) || 1;
+
+  for (let index = next.length - 1; index > 0; index -= 1) {
+    state = (state * 1664525 + 1013904223) % 4294967296;
+    const swapIndex = state % (index + 1);
+    const current = next[index];
+    next[index] = next[swapIndex] as T;
+    next[swapIndex] = current as T;
+  }
+
+  return next;
+}
+
+function buildAssessmentOptions<
+  TItem extends {
+    canonicalAnswer?: string;
+    content?: string;
+    date?: string;
+    definition?: string;
+    id?: string;
+    person?: string;
+    subtopic?: string;
+    term?: string;
+    topic: string;
+  }
+>(
+  item: TItem,
+  sourceItems: readonly TItem[],
+  index: number
+): Pick<AssessmentItem, "correctOptionIds" | "options" | "questionType"> {
+  const itemAnswerText = deriveAnswerText(item);
+  const otherPhrases = unique(
+    sourceItems
+      .filter((candidate) => candidate.id !== item.id)
+      .flatMap((candidate) => {
+        const structuredPhrases = [
+          candidate.term,
+          candidate.person,
+          candidate.date,
+          candidate.subtopic
+        ].filter((value): value is string => Boolean(value));
+
+        const answerPhrases = extractSelectablePhrases(deriveAnswerText(candidate));
+        return [...structuredPhrases, ...answerPhrases];
+      })
+      .filter((value) => normalize(value) !== normalize(itemAnswerText))
+  );
+
+  const correctPhrases = unique(
+    [
+      item.term,
+      item.person,
+      item.date,
+      ...extractSelectablePhrases(itemAnswerText)
+    ].filter((value): value is string => Boolean(value))
+  );
+
+  if (correctPhrases.length >= 2 && otherPhrases.length >= 2) {
+    const correctOptions = correctPhrases.slice(0, 3).map((text, optionIndex) => ({
+      id: `option_correct_${index + 1}_${optionIndex + 1}`,
+      text
+    }));
+    const distractors = shuffleSeeded(otherPhrases, `${item.id}:multi-select`)
+      .slice(0, 3)
+      .map((text, optionIndex) => ({
+        id: `option_distractor_${index + 1}_${optionIndex + 1}`,
+        text
+      }));
+    const options = shuffleSeeded(
+      [...correctOptions, ...distractors],
+      `${item.id}:multi-select:options`
+    );
+
+    return {
+      questionType: "multiple_select",
+      options,
+      correctOptionIds: correctOptions.map((option) => option.id)
+    };
+  }
+
+  const correctOptionText =
+    item.term ?? item.person ?? item.date ?? correctPhrases[0] ?? itemAnswerText;
+  const distractorTexts = shuffleSeeded(otherPhrases, `${item.id}:multiple-choice`).slice(0, 3);
+  if (correctOptionText && distractorTexts.length >= 2) {
+    const options: AssessmentOption[] = shuffleSeeded(
+      [
+        { id: `option_correct_${index + 1}`, text: correctOptionText },
+        ...distractorTexts.map((text, optionIndex) => ({
+          id: `option_distractor_${index + 1}_${optionIndex + 1}`,
+          text
+        }))
+      ],
+      `${item.id}:multiple-choice:options`
+    );
+
+    const correct = options.find((option) => normalize(option.text) === normalize(correctOptionText));
+    return {
+      questionType: "multiple_choice",
+      options,
+      correctOptionIds: correct ? [correct.id] : []
+    };
+  }
+
+  return {
+    questionType: "free_form"
+  };
+}
+
+function buildLoopQuickCheck(
+  item: {
+    canonicalAnswer?: string;
+    content?: string;
+    date?: string;
+    definition?: string;
+    itemType?: string;
+    person?: string;
+    prompt?: string;
+    sourceRef?: string;
+    subtopic?: string;
+    term?: string;
+    topic: string;
+  },
+  sourceItems: readonly {
+    canonicalAnswer?: string;
+    content?: string;
+    date?: string;
+    definition?: string;
+    itemType?: string;
+    person?: string;
+    prompt?: string;
+    sourceRef?: string;
+    subtopic?: string;
+    term?: string;
+    topic: string;
+  }[],
+  index: number
+): {
+  prompt: string;
+  questionType?: AssessmentQuestionType;
+  options?: readonly AssessmentOption[];
+  correctOptionIds?: readonly string[];
+  hint?: string;
+  sourceFact?: string;
+} {
+  const questionShape = buildAssessmentOptions(item, sourceItems, index);
+  const prompt =
+    "prompt" in item && item.prompt
+      ? item.prompt
+      : item.itemType === "key_term"
+        ? `Which definition best matches ${item.term ?? item.subtopic ?? item.topic}?`
+        : item.itemType === "person"
+          ? `Which statement best describes ${item.person ?? item.subtopic ?? item.topic}?`
+          : item.itemType === "date"
+            ? `Which event matches ${item.date ?? item.subtopic ?? item.topic}?`
+            : `Which detail best explains ${item.subtopic ?? item.topic}?`;
+  const sourceFact = item.content ?? item.definition ?? deriveAnswerText(item);
+  const sourceRef = item.sourceRef ? ` (${item.sourceRef})` : "";
+
+  return {
+    prompt: sourceRef ? `${prompt} [Source: ${item.sourceRef}]` : prompt,
+    questionType: questionShape.questionType,
+    options: questionShape.options,
+    correctOptionIds: questionShape.correctOptionIds,
+    hint: `Hint${sourceRef}: ${sourceFact}`,
+    sourceFact
+  };
 }
 
 function buildPracticeFront(item: MasterDataItem): string {
-  if (item.itemType === "person" && item.person) {
-    return `Who was ${item.person}?`;
-  }
-
-  if (item.itemType === "key_term" && item.term) {
-    return `What does ${item.term} mean?`;
-  }
-
-  if (item.itemType === "date" && item.date) {
-    return `What happened in ${item.date}?`;
-  }
-
-  return item.prompt;
+  return isGenericRecallPrompt(item.prompt)
+    ? buildSpecificRecallPrompt(item, "practice")
+    : item.prompt;
 }
 
 function buildPracticeBack(item: MasterDataItem): string {
   return item.content ?? item.definition ?? item.canonicalAnswer;
+}
+
+function isAssessmentAnswerCorrect(item: AssessmentItem, answer: string): boolean {
+  if (item.questionType === "multiple_choice" || item.questionType === "multiple_select") {
+    const submittedParts = unique(
+      answer
+        .split(/\s*\|\|\s*|\s*;\s*/g)
+        .map((part) => part.trim())
+        .filter(Boolean)
+    );
+    const selectedOptionIds = new Set(
+      (item.options ?? [])
+        .filter((option) =>
+          submittedParts.some((part) => normalize(part) === normalize(option.text))
+        )
+        .map((option) => option.id)
+    );
+    const correctOptionIds = new Set(item.correctOptionIds ?? []);
+
+    if (correctOptionIds.size > 0) {
+      return (
+        correctOptionIds.size === selectedOptionIds.size &&
+        [...correctOptionIds].every((optionId) => selectedOptionIds.has(optionId))
+      );
+    }
+  }
+
+  return normalize(answer) === normalize(item.canonicalAnswer);
 }
 
 export class FixtureAgentRuntime implements AgentRuntime {
@@ -126,10 +414,19 @@ export class FixtureAgentRuntime implements AgentRuntime {
       topic: string;
     };
     contextTopic: string;
+    materialInterpretation?: MasterDataInterpretationCandidate;
     learningLoopId: string;
     responses: readonly {
       answer: string;
       itemId: string;
+    }[];
+    sourceEvidence?: readonly {
+      content: string;
+      excerpt: string;
+      sourceMasterDataItemId?: string;
+      sourceRef: string;
+      subtopic: string;
+      topic: string;
     }[];
   }): Result<AssessmentAttemptEvaluationCandidate> {
     const responseByItemId = new Map(
@@ -145,7 +442,7 @@ export class FixtureAgentRuntime implements AgentRuntime {
 
     const itemResults: EvaluationItemResult[] = input.assessment.items.map((item) => {
       const answer = responseByItemId.get(item.id) ?? "";
-      const correct = normalize(answer) === normalize(item.canonicalAnswer);
+      const correct = isAssessmentAnswerCorrect(item, answer);
 
       return {
         itemId: item.id,
@@ -289,15 +586,25 @@ export class FixtureAgentRuntime implements AgentRuntime {
     source: MasterDataSource;
     sourceItems: readonly MasterDataItem[];
   }): Result<InitialAssessmentGenerationCandidate> {
-    const items = input.sourceItems.map((item, index) => ({
-      id: `assessment_item_${index + 1}`,
-      topic: item.topic,
-      prompt: buildAssessmentPrompt(item),
-      canonicalAnswer: item.canonicalAnswer,
-      visibleMaterial: item.visibleMaterial,
-      difficulty: difficultyScale[index] ?? "stretch",
-      sourceMasterDataItemId: item.id
-    }));
+    const selectedSourceItems = input.sourceItems.slice(0, input.context.questionCount);
+    const items = selectedSourceItems.map((item, index) => {
+      const questionShape = buildAssessmentOptions(item, input.sourceItems, index);
+
+      return {
+        id: `assessment_item_${index + 1}`,
+        topic: item.topic,
+        prompt: buildAssessmentPrompt(item),
+        canonicalAnswer: item.canonicalAnswer,
+        visibleMaterial: item.visibleMaterial,
+        difficulty: difficultyScale[index] ?? "stretch",
+        sourceMasterDataItemId: item.id,
+        questionType: questionShape.questionType,
+        options: questionShape.options,
+        correctOptionIds: questionShape.correctOptionIds,
+        hint: buildHint(item),
+        sourceFact: item.content ?? item.canonicalAnswer
+      };
+    });
 
     return ok({
       runtimeTrace: {
@@ -306,14 +613,22 @@ export class FixtureAgentRuntime implements AgentRuntime {
         runtimeArtifacts: []
       },
       items,
+      blueprint: buildAssessmentBlueprint({
+        maxQuestionCount: input.context.questionCount,
+        items,
+        sourceItems: selectedSourceItems,
+        topic: input.context.topic
+      }),
       artifactContent: {
         topic: input.context.topic,
-        questionCount: input.context.questionCount,
-        instructions: `Complete all ${input.context.questionCount} questions without notes. The goal is to diagnose current understanding in ${input.context.topic}.`,
+        questionCount: items.length,
+        instructions: `Complete all ${items.length} questions without notes. The goal is to diagnose current understanding in ${input.context.topic}.`,
         items: items.map((item) => ({
           id: item.id,
           prompt: item.prompt,
-          difficulty: item.difficulty
+          difficulty: item.difficulty,
+          questionType: item.questionType,
+          hint: item.hint
         }))
       }
     });
@@ -352,6 +667,100 @@ export class FixtureAgentRuntime implements AgentRuntime {
         instructions: `Review each card, attempt an answer from memory, then flip to check accuracy for ${input.context.topic}.`,
         cards
       }
+    });
+  }
+
+  generateLearningLoopBatch(input: {
+    desiredLoopCount: number;
+    learningLoopId: string;
+    materialInterpretation: MasterDataInterpretationCandidate;
+    targetLoopDurationMinutes: number;
+    diagnosedGaps: readonly {
+      description: string;
+      evidence: string;
+      id: string;
+      severity: "high" | "medium" | "low";
+      topic: string;
+    }[];
+    evaluation: {
+      itemResults: readonly EvaluationItemResult[];
+      score: number;
+    };
+    learnerYearGroup: string;
+  }): Result<LearningLoopBatchGenerationCandidate> {
+    if (input.diagnosedGaps.length === 0) {
+      return err({
+        code: "VALIDATION_ERROR",
+        message: "At least one diagnosed gap is required to build a loop batch."
+      });
+    }
+
+    const objectives = input.materialInterpretation.learningObjectives;
+    const interpretationItems = input.materialInterpretation.items;
+    const sourceMap = new Map(
+      input.materialInterpretation.sourceMap.map((entry) => [entry.sourceRef, entry.excerpt])
+    );
+    const units: LearningLoopBatchGenerationCandidate["units"] = input.diagnosedGaps
+      .slice(0, input.desiredLoopCount)
+      .map((gap, index) => {
+        const state: "ready" | "locked" = index === 0 ? "ready" : "locked";
+        const matchingObjective =
+          objectives.find((objective) =>
+            normalize(objective.objective).includes(normalize(gap.topic))
+          ) ?? objectives[index % objectives.length] ?? objectives[0];
+        const objectiveRefs = matchingObjective ? [matchingObjective.id] : [];
+        const objectiveSourceRefs = matchingObjective?.sourceRefs ?? [];
+        const matchingItems = interpretationItems.filter((item) =>
+          objectiveSourceRefs.includes(item.sourceRef) ||
+          normalize(item.topic) === normalize(gap.topic) ||
+          normalize(item.subtopic).includes(normalize(gap.description))
+        );
+        const sourceRefs = unique(
+          (matchingItems.length > 0 ? matchingItems : interpretationItems.slice(index, index + 2)).map(
+            (item) => item.sourceRef
+          )
+        ).slice(0, 3);
+        const explanationSource = sourceRefs
+          .map((sourceRef) => sourceMap.get(sourceRef))
+          .find(Boolean) ?? input.materialInterpretation.learnerFacingMaterialSummary;
+        const focus = matchingItems[0]?.subtopic ?? gap.topic;
+
+        return {
+          focus,
+          reason: `${gap.description} was one of the least secure ideas in the check-up.`,
+          objectiveRefs,
+          sourceRefs,
+          shortExplanation: explanationSource,
+          learnerTask: `Spend ${input.targetLoopDurationMinutes} minutes explaining ${focus} in your own words, then write one example from the source without looking back.`,
+          quickCheckQuestions: (matchingItems.length > 0 ? matchingItems : interpretationItems.slice(index, index + 2))
+            .slice(0, 2)
+            .map((item, questionIndex) => buildLoopQuickCheck(item, interpretationItems, questionIndex)),
+          reviewItems:
+            sourceRefs.length > 0
+              ? [
+                  {
+                    prompt: `Which precise detail about ${focus} should you be able to recall without looking?`,
+                    answer: explanationSource
+                  }
+                ]
+              : [],
+          targetKnowledgeGapIds: [gap.id],
+          state
+        };
+      });
+
+    return ok({
+      runtimeTrace: {
+        provider: "fixture",
+        operation: "generateLearningLoopBatch",
+        runtimeArtifacts: []
+      },
+      overview:
+        input.evaluation.score < 0.5
+          ? `Start with short loops on the biggest ${input.materialInterpretation.mainTopic} gaps before moving on.`
+          : `Work through a short batch to tighten the remaining ${input.materialInterpretation.mainTopic} gaps.`,
+      targetDurationMinutes: input.targetLoopDurationMinutes,
+      units
     });
   }
 
@@ -609,6 +1018,55 @@ function buildObjectiveText(input: {
   }
 
   return `Explain the main ideas in ${input.objective} and connect them to the wider topic of ${input.topic}.`;
+}
+
+function buildAssessmentBlueprint(input: {
+  items: InitialAssessmentGenerationCandidate["items"];
+  maxQuestionCount: number;
+  sourceItems: readonly MasterDataItem[];
+  topic: string;
+}) {
+  const coveredSubtopics = unique(
+    input.sourceItems.map((item) => item.subtopic?.trim() || item.topic.trim()).filter(Boolean)
+  );
+  const sourceRefs = unique(
+    input.sourceItems.map((item) => item.sourceRef).filter((value): value is string => Boolean(value))
+  );
+  const questionTypeMix = uniqueQuestionTypes(input.items.map((item) => item.questionType ?? "free_form"));
+  const difficultyProfile = {
+    easy: proportionOf(input.items, "easy"),
+    medium: proportionOf(input.items, "medium"),
+    stretch: proportionOf(input.items, "stretch")
+  };
+
+  return {
+    questionCount: input.items.length,
+    maxQuestionCount: input.maxQuestionCount,
+    targetDurationMinutes: Math.max(5, input.items.length),
+    questionTypeMix,
+    coveredSubtopics,
+    objectiveRefs: [],
+    sourceRefs,
+    difficultyProfile,
+    rationale: `Use a short mixed diagnostic for ${input.topic} that covers distinct source-backed ideas before repeating a narrow fact.`
+  };
+}
+
+function proportionOf(
+  items: readonly { difficulty: "easy" | "medium" | "stretch" }[],
+  difficulty: "easy" | "medium" | "stretch"
+) {
+  if (items.length === 0) {
+    return 0;
+  }
+
+  return Number(
+    (items.filter((item) => item.difficulty === difficulty).length / items.length).toFixed(2)
+  );
+}
+
+function uniqueQuestionTypes(values: readonly AssessmentQuestionType[]): AssessmentQuestionType[] {
+  return [...new Set(values)];
 }
 
 function joinList(values: readonly string[]) {

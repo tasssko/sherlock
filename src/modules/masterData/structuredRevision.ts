@@ -445,23 +445,53 @@ function buildPrompt(item: StructuredMasterDataFields): string {
     case "key_term":
       return `What does ${item.term ?? anchor ?? "this term"} mean?`;
     case "date":
-      return `What happened in ${item.date ?? anchor ?? "this year"}?`;
+      return `Why does ${item.date ?? anchor ?? "this year"} matter in ${context}?`;
     case "cause":
-      return `What was one cause linked to ${context}?`;
+      return anchor && !samePhrase(anchor, context)
+        ? `Why did ${anchor} matter in ${context}?`
+        : `What caused ${context}?`;
     case "event":
       return anchor
-        ? `What happened to ${anchor} during ${context}?`
+        ? `What happened to ${anchor} in ${context}?`
         : `What happened during ${context}?`;
     case "consequence":
       return `What was one consequence of ${context}?`;
     case "legacy":
-      return `What was part of ${item.topic}'s legacy?`;
+      return anchor && !samePhrase(anchor, context)
+        ? `What legacy did ${anchor} leave in ${context}?`
+        : `What legacy did ${context} leave behind?`;
     case "fact":
     default:
-      return anchor
-        ? `What should you remember about ${anchor} in ${context}?`
-        : `What is one key fact from ${context}?`;
+      return buildFactPrompt(item, context, anchor);
   }
+}
+
+function buildFactPrompt(
+  item: StructuredMasterDataFields,
+  context: string,
+  anchor: string | undefined
+): string {
+  if (anchor && !samePhrase(anchor, context) && !samePhrase(anchor, item.topic)) {
+    return `How does ${anchor} help explain ${context}?`;
+  }
+
+  if (context && !samePhrase(context, item.topic)) {
+    return `Explain one key idea about ${context} in ${item.topic}.`;
+  }
+
+  return `Explain one key idea about ${item.topic}.`;
+}
+
+function samePhrase(left: string, right: string): boolean {
+  return normalizePhrase(left) === normalizePhrase(right);
+}
+
+function normalizePhrase(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function buildVisibleMaterial(item: StructuredMasterDataFields): string {

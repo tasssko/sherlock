@@ -159,6 +159,51 @@ describe("Capability and policy enforcement", () => {
     ]);
   });
 
+  it("allows an assessment to return fewer items than the requested maximum", () => {
+    const context = InitialAssessmentContext.create({
+      command: {
+        learnerName: "Year 7 learner",
+        yearGroup: "Year 7",
+        topic: "fractions",
+        questionCount: 5
+      },
+      sourceName: "Fractions Bank"
+    });
+    const events = createDomainEventRecorder(createWorkspaceId());
+    const agent = createInitialAssessmentAgent();
+    const artifactContent: AssessmentArtifactContent = {
+      topic: "fractions",
+      questionCount: 4,
+      instructions: "Complete all 4 questions.",
+      items: [
+        {
+          id: "item_1",
+          prompt: "Simplify 6/8.",
+          difficulty: "easy"
+        },
+        {
+          id: "item_2",
+          prompt: "Explain equivalent fractions.",
+          difficulty: "medium"
+        },
+        {
+          id: "item_3",
+          prompt: "Compare 2/3 and 3/5.",
+          difficulty: "stretch"
+        },
+        {
+          id: "item_4",
+          prompt: "Write a fraction equal to 1/2.",
+          difficulty: "easy"
+        }
+      ]
+    };
+
+    const result = validateAssessmentArtifact(agent, context, artifactContent, events);
+
+    expect(result.ok).toBe(true);
+  });
+
   it("fails assessment policy evaluation on the first violation", () => {
     const context = InitialAssessmentContext.create({
       command: {

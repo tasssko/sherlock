@@ -94,6 +94,16 @@ export type LearningLoopCreatedEvent = BaseEvent<
   { learningLoopId: LearningLoopId; phase: string; topic: string }
 >;
 
+export type LearningLoopCompletedEvent = BaseEvent<
+  "learning-loop.completed",
+  { learningLoopId: LearningLoopId; topic: string }
+>;
+
+export type LearningLoopSupersededEvent = BaseEvent<
+  "learning-loop.superseded",
+  { learningLoopId: LearningLoopId; topic: string; supersededByTopic: string }
+>;
+
 export type InitialAssessmentGeneratedEvent = BaseEvent<
   "initial-assessment.generated",
   { learningLoopId: LearningLoopId; assessmentId: AssessmentId; artifactId: ArtifactId }
@@ -192,8 +202,10 @@ export type DomainEvent =
   | EvaluationCreatedEvent
   | InitialAssessmentGeneratedEvent
   | KnowledgeGapsIdentifiedEvent
+  | LearningLoopCompletedEvent
   | LearningLoopCreatedEvent
   | LearningLoopMasteryProfileUpdatedEvent
+  | LearningLoopSupersededEvent
   | MasterDataSourceRegisteredEvent
   | PolicyEvaluatedEvent
   | PracticeActivityCompletedEvent
@@ -350,6 +362,29 @@ export class DomainEventRecorder {
         learningLoopId,
         phase,
         topic
+      })
+    );
+  }
+
+  recordLearningLoopCompleted(learningLoopId: LearningLoopId, topic: string): void {
+    this.items.push(
+      makeEvent(this.workspaceId, "learning-loop.completed", {
+        learningLoopId,
+        topic
+      })
+    );
+  }
+
+  recordLearningLoopSuperseded(
+    learningLoopId: LearningLoopId,
+    topic: string,
+    supersededByTopic: string
+  ): void {
+    this.items.push(
+      makeEvent(this.workspaceId, "learning-loop.superseded", {
+        learningLoopId,
+        topic,
+        supersededByTopic
       })
     );
   }

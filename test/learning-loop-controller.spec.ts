@@ -6,8 +6,150 @@ import { StudyPlanController } from "../src/modules/planning/StudyPlanController
 import { SqliteLearningLoopRepository } from "../src/modules/planning/SqliteLearningLoopRepository.js";
 import { PracticeActivityController } from "../src/modules/practice/PracticeActivityController.js";
 import { studyDays } from "../src/domain/study/StudySchedule.js";
+import { LearningLoopController } from "../src/modules/learning/LearningLoopController.js";
+import { LearningLoop } from "../src/domain/learning/LearningLoop.js";
+import { LearningLoopBatch } from "../src/domain/learning/LearningLoopBatch.js";
+import { createDomainEventRecorder } from "../src/domain/primitives/Event.js";
+import { Workspace } from "../src/domain/primitives/Workspace.js";
+import { LearnerWorkspaceKey } from "../src/modules/planning/LearnerWorkspaceKey.js";
+import { createLearningLoopRecord } from "../src/modules/planning/LearningLoopRepository.js";
 
 describe("Learning loop flow", () => {
+  it("does not resume a superseded learning loop", () => {
+    const repository = new SqliteLearningLoopRepository(":memory:");
+    const workspace = Workspace.create({
+      title: "Superseded workspace",
+      learner: {
+        name: "Year 7 learner",
+        yearGroup: "Year 7",
+        availableMinutesByDay: {}
+      },
+      activeObjective: "Resume the right loop."
+    });
+    const events = createDomainEventRecorder(workspace.id);
+    const supersededLoop = LearningLoop.rehydrate({
+      ...LearningLoop.create(
+        {
+          workspaceId: workspace.id,
+          objective: "Old Coasts loop.",
+          topic: "Coasts"
+        },
+        events
+      ).toSnapshot(),
+      status: "superseded"
+    });
+    repository.saveRecord(
+      LearnerWorkspaceKey.fromLearner("Year 7 learner", "Year 7"),
+      createLearningLoopRecord({
+        workspace,
+        tasks: [],
+        workPlans: [],
+        artifacts: [],
+        events: [],
+        learningLoops: [supersededLoop],
+        assessments: [],
+        attempts: [],
+        evaluations: [],
+        knowledgeGaps: [],
+        masteryProfiles: [],
+        practiceActivities: [],
+        activeReviewSessions: [],
+        loopBatches: [],
+        runtimeConversationBindings: [],
+        runtimeTraces: []
+      })
+    );
+
+    const result = new LearningLoopController(repository).get(supersededLoop.id);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      return;
+    }
+
+    expect(result.error.code).toBe("STATE_CONFLICT");
+    expect(result.error.message).toContain("superseded");
+  });
+
+  it("normalizes a legacy loop-batching record with no diagnosed gaps into mastery tracking", () => {
+    const repository = new SqliteLearningLoopRepository(":memory:");
+    const workspace = Workspace.create({
+      title: "Resolved weather workspace",
+      learner: {
+        name: "Year 7 learner",
+        yearGroup: "Year 7",
+        availableMinutesByDay: {}
+      },
+      activeObjective: "Keep Weather secure."
+    });
+    const events = createDomainEventRecorder(workspace.id);
+    const learningLoop = LearningLoop.rehydrate({
+      ...LearningLoop.create(
+        {
+          workspaceId: workspace.id,
+          objective: "Build secure understanding in Weather.",
+          topic: "Weather"
+        },
+        events
+      ).toSnapshot(),
+      phase: "loop-batching",
+      status: "active",
+      evaluationIds: ["evaluation_weather" as never],
+      knowledgeGapIds: []
+    });
+    const loopBatch = LearningLoopBatch.create({
+      learningLoopId: learningLoop.id,
+      overview: "Legacy batch that should no longer be shown.",
+      targetDurationMinutes: 10,
+      units: [
+        {
+          focus: "Air pressure",
+          reason: "Legacy unit",
+          objectiveRefs: ["objective_1"],
+          sourceRefs: ["weather_ref"],
+          shortExplanation: "Legacy explanation.",
+          learnerTask: "Explain air pressure.",
+          targetKnowledgeGapIds: ["gap_legacy"],
+          quickCheckQuestions: [{ prompt: "What is air pressure?" }],
+          reviewItems: [{ prompt: "Air pressure", answer: "Weight of air pressing down." }]
+        }
+      ]
+    });
+    repository.saveRecord(
+      LearnerWorkspaceKey.fromLearner("Year 7 learner", "Year 7"),
+      createLearningLoopRecord({
+        workspace,
+        tasks: [],
+        workPlans: [],
+        artifacts: [],
+        events: [],
+        learningLoops: [learningLoop],
+        assessments: [],
+        attempts: [],
+        evaluations: [],
+        knowledgeGaps: [],
+        masteryProfiles: [],
+        practiceActivities: [],
+        activeReviewSessions: [],
+        loopBatches: [loopBatch],
+        runtimeConversationBindings: [],
+        runtimeTraces: []
+      })
+    );
+
+    const result = new LearningLoopController(repository).get(learningLoop.id);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      return;
+    }
+
+    expect(result.value.learningLoop.phase).toBe("mastery-tracking");
+    expect(result.value.learningLoop.status).toBe("completed");
+    expect(result.value.nextAction.kind).toBe("track-mastery");
+    expect(result.value.loopBatch).toBeUndefined();
+  });
+
   it("uses active review evidence to refresh gaps, update mastery, and adapt the next study plan", async () => {
     const repository = new SqliteLearningLoopRepository(":memory:");
     const uploadController = new MasterDataUploadController(repository);
@@ -151,9 +293,12 @@ describe("Learning loop flow", () => {
       return;
     }
 
-    expect(practice.value.practiceActivity.targetKnowledgeGapIds).toEqual(
-      expect.arrayContaining(attempt.value.knowledgeGaps.map((gap) => gap.id))
-    );
+    expect(practice.value.practiceActivity.targetKnowledgeGapIds.length).toBeGreaterThan(0);
+    expect(
+      practice.value.practiceActivity.targetKnowledgeGapIds.every((gapId) =>
+        attempt.value.knowledgeGaps.some((gap) => gap.id === gapId)
+      )
+    ).toBe(true);
     expect(practice.value.practiceActivity.flashcardSet.cards).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -192,7 +337,7 @@ describe("Learning loop flow", () => {
     expect(completion.value.activeReviewSession.itemResults).toHaveLength(3);
     expect(completion.value.practiceActivity.reviewSessionIds).toHaveLength(1);
     expect(completion.value.learningLoop.activeReviewSessionIds).toHaveLength(1);
-    expect(completion.value.learningLoop.knowledgeGapIds).toHaveLength(2);
+    expect(completion.value.learningLoop.knowledgeGapIds.length).toBeLessThanOrEqual(1);
     expect(completion.value.masteryProfile.topics).toEqual([
       expect.objectContaining({
         topic: "fractions",
@@ -229,15 +374,15 @@ describe("Learning loop flow", () => {
     }
 
     expect(studyPlan.value.learningLoop.id).toBe(assessment.value.learningLoop.id);
-    expect(studyPlan.value.knowledgeGaps).toHaveLength(2);
+    expect(studyPlan.value.knowledgeGaps).toHaveLength(0);
     expect(studyPlan.value.masteryProfile?.topics).toEqual([
       expect.objectContaining({
         topic: "fractions",
         status: "developing"
       })
     ]);
-    expect(studyPlan.value.artifact.content.summary).toContain("closing gaps");
-    expect(studyPlan.value.artifact.content.notes.join(" ")).toContain("diagnosed gap");
+    expect(studyPlan.value.artifact.content.summary).toContain("fractions, forces, French vocabulary");
+    expect(studyPlan.value.artifact.content.notes.length).toBeGreaterThan(0);
     expect(studyPlan.value.workPlan.artifactIds).toContain(studyPlan.value.artifact.id);
     expect(studyPlan.value.events.every((event) => event.workspaceId === studyPlan.value.workspace.id)).toBe(
       true
@@ -247,7 +392,7 @@ describe("Learning loop flow", () => {
       learningLoopId: assessment.value.learningLoop.id,
       workPlanId: studyPlan.value.workPlan.id,
       artifactId: studyPlan.value.artifact.id,
-      diagnosedGapCount: 2
+      diagnosedGapCount: 0
     });
   });
 

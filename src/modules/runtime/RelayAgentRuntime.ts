@@ -4,6 +4,7 @@ import type {
   AgentRuntime,
   AssessmentAttemptEvaluationCandidate,
   InitialAssessmentGenerationCandidate,
+  LearningLoopBatchGenerationCandidate,
   MasterDataInterpretationResultCandidate,
   PracticeActivityGenerationCandidate,
   StudyPlanGenerationCandidate
@@ -25,11 +26,13 @@ import {
   validateMasterDataInterpretationCandidate,
   type MasterDataInterpretationCandidate
 } from "../masterData/MasterDataInterpretation.js";
-import type { AssessmentItem } from "../../domain/learning/Assessment.js";
+import { validateLearningLoopBatchCandidate } from "../loopBatch/LearningLoopBatchValidation.js";
+import type { AssessmentItem, EvaluationItemResult } from "../../domain/learning/Assessment.js";
 import type {
   PracticeItem,
   PracticeItemResponse
 } from "../../domain/learning/PracticeActivity.js";
+import type { KnowledgeGapSeverity } from "../../domain/learning/LearningLoop.js";
 import type { LoopStudyRelayCapability } from "./LoopStudyRelayRuntimeProfile.js";
 import type { RuntimeTraceSeed } from "./RuntimeTrace.js";
 import { RelayWorkspaceBinding } from "./RelayWorkspaceBinding.js";
@@ -92,20 +95,29 @@ export class RelayAgentRuntime implements AgentRuntime {
     });
   }
 
-  evaluateAssessmentAttempt(input: {
+  async evaluateAssessmentAttempt(input: {
     assessment: {
       items: readonly AssessmentItem[];
       topic: string;
     };
     contextTopic: string;
+    materialInterpretation?: MasterDataInterpretationCandidate;
     learningLoopId: string;
     responses: readonly {
       answer: string;
       itemId: string;
     }[];
+    sourceEvidence?: readonly {
+      content: string;
+      excerpt: string;
+      sourceMasterDataItemId?: string;
+      sourceRef: string;
+      subtopic: string;
+      topic: string;
+    }[];
     runtimeConversationBinding?: RuntimeConversationBinding;
   }): Promise<Result<AssessmentAttemptEvaluationCandidate>> {
-    return this.runStructuredConversation<AssessmentAttemptEvaluationCandidate>({
+    const generated = await this.runStructuredConversation<AssessmentAttemptEvaluationCandidate>({
       failureMessage:
         "The assessment service could not evaluate this attempt right now.",
       capability: "evaluateAssessmentAttempt",
@@ -116,9 +128,42 @@ export class RelayAgentRuntime implements AgentRuntime {
       payload: {
         assessment: input.assessment,
         contextTopic: input.contextTopic,
-        responses: input.responses
+        responses: input.responses,
+        materialInterpretation: input.materialInterpretation,
+        sourceEvidence: input.sourceEvidence ?? [],
+        markingRules: [
+          "Mark answers against the assessment item, accepted interpretation, and cited source evidence only.",
+          "Reward accurate, source-grounded partial understanding in feedback, but only mark correct when the answer fully meets the expected response.",
+          "Use the accepted interpretation objectives and source refs to identify specific focus areas and knowledge gaps.",
+          "Do not invent extra facts or reveal hidden scoring internals in learner-facing feedback."
+        ]
       }
     });
+    if (!generated.ok) {
+      return generated;
+    }
+
+    try {
+      const normalized = normalizeAssessmentAttemptEvaluationCandidate(generated.value, {
+        assessment: input.assessment,
+        contextTopic: input.contextTopic,
+        responses: input.responses
+      });
+
+      return ok({
+        ...normalized,
+        runtimeConversationBinding: generated.value.runtimeConversationBinding,
+        runtimeTrace: generated.value.runtimeTrace
+      });
+    } catch (error) {
+      return err({
+        code: "VALIDATION_ERROR",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Assessment attempt evaluation candidate failed validation."
+      });
+    }
   }
 
   async interpretMasterData(input: {
@@ -190,17 +235,23 @@ export class RelayAgentRuntime implements AgentRuntime {
     sourceItems: readonly MasterDataItem[];
     runtimeConversationBinding?: RuntimeConversationBinding;
   }): Promise<Result<InitialAssessmentGenerationCandidate>> {
+    const acceptedInterpretationItems =
+      input.source.acceptedInterpretation?.items.length
+        ? input.source.acceptedInterpretation.items
+        : undefined;
     const relevantSourceExcerpts = buildSourceEvidenceFromInterpretation({
       interpretation: input.source.acceptedInterpretation,
-      items: input.sourceItems.map((item) => ({
-        subject: item.subject ?? inferSubjectFromSourceName(input.source.name) ?? "Unknown",
-        yearGroup: item.yearGroup ?? input.context.yearGroup,
-        topic: item.topic,
-        subtopic: item.subtopic ?? item.topic,
-        itemType: item.itemType ?? "fact",
-        content: item.content ?? item.canonicalAnswer,
-        sourceRef: item.sourceRef ?? item.id
-      }))
+      items:
+        acceptedInterpretationItems ??
+        input.sourceItems.map((item) => ({
+          subject: item.subject ?? inferSubjectFromSourceName(input.source.name) ?? "Unknown",
+          yearGroup: item.yearGroup ?? input.context.yearGroup,
+          topic: item.topic,
+          subtopic: item.subtopic ?? item.topic,
+          itemType: item.itemType ?? "fact",
+          content: item.content ?? item.canonicalAnswer,
+          sourceRef: item.sourceRef ?? item.id
+        }))
     });
 
     const generated = await this.runStructuredConversation<InitialAssessmentGenerationCandidate>({
@@ -214,9 +265,7 @@ export class RelayAgentRuntime implements AgentRuntime {
       payload: {
         context: input.context.toSnapshot(),
         topic: input.context.topic,
-        materialInterpretation: input.source.acceptedInterpretation
-          ? buildMasterDataInterpretationSummary(input.source.acceptedInterpretation)
-          : {
+        materialInterpretation: input.source.acceptedInterpretation ?? {
               mainTopic: input.context.topic,
               subject:
                 input.sourceItems[0]?.subject ??
@@ -244,7 +293,9 @@ export class RelayAgentRuntime implements AgentRuntime {
               ),
               learningObjectives: [],
               processes: [],
-              learnerFacingMaterialSummary: undefined
+              learnerFacingMaterialSummary: undefined,
+              sourceMap: [],
+              items: []
             },
         relevantSourceExcerpts,
         source: {
@@ -349,6 +400,72 @@ export class RelayAgentRuntime implements AgentRuntime {
     });
   }
 
+  generateLearningLoopBatch(input: {
+    desiredLoopCount: number;
+    learningLoopId: string;
+    materialInterpretation: MasterDataInterpretationCandidate;
+    targetLoopDurationMinutes: number;
+    diagnosedGaps: readonly {
+      description: string;
+      evidence: string;
+      id: string;
+      severity: "high" | "medium" | "low";
+      topic: string;
+    }[];
+    evaluation: {
+      itemResults: readonly EvaluationItemResult[];
+      score: number;
+    };
+    learnerYearGroup: string;
+    runtimeConversationBinding?: RuntimeConversationBinding;
+  }): Promise<Result<LearningLoopBatchGenerationCandidate>> {
+    return this.runStructuredConversation<LearningLoopBatchGenerationCandidate>({
+      failureMessage:
+        "The loop service could not prepare the next study loops right now.",
+      capability: "generateLearningLoopBatch",
+      expectedOutputSchema: "LearningLoopBatchCandidate.v1",
+      operation: "generateLearningLoopBatch",
+      learningLoopId: input.learningLoopId,
+      runtimeConversationBinding: input.runtimeConversationBinding,
+      payload: {
+        learnerYearGroup: input.learnerYearGroup,
+        desiredLoopCount: input.desiredLoopCount,
+        targetLoopDurationMinutes: input.targetLoopDurationMinutes,
+        materialInterpretation: input.materialInterpretation,
+        diagnosedGaps: input.diagnosedGaps,
+        evaluation: input.evaluation
+      }
+    }).then((generated) => {
+      if (!generated.ok) {
+        return generated;
+      }
+
+      try {
+        const candidate = validateLearningLoopBatchCandidate({
+          candidate: generated.value,
+          diagnosedGaps: input.diagnosedGaps,
+          interpretation: input.materialInterpretation
+        });
+
+        return ok({
+          overview: candidate.overview,
+          targetDurationMinutes: candidate.targetDurationMinutes,
+          units: candidate.units,
+          runtimeConversationBinding: generated.value.runtimeConversationBinding,
+          runtimeTrace: generated.value.runtimeTrace
+        });
+      } catch (error) {
+        return err({
+          code: "VALIDATION_ERROR",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Learning loop batch candidate failed validation."
+        });
+      }
+    });
+  }
+
   generateStudyPlan(input: {
     context: StudyPlanningContext;
     learningLoopId: string;
@@ -368,6 +485,34 @@ export class RelayAgentRuntime implements AgentRuntime {
         materialInterpretations: (input.materialInterpretations ?? []).map((interpretation) =>
           buildMasterDataInterpretationSummary(interpretation)
         )
+      }
+    }).then((generated) => {
+      if (!generated.ok) {
+        return generated;
+      }
+
+      try {
+        const normalized = normalizeStudyPlanGenerationCandidate(generated.value, {
+          context: input.context
+        });
+
+        return ok({
+          ...normalized,
+          runtimeConversationBinding: generated.value.runtimeConversationBinding,
+          runtimeTrace: generated.value.runtimeTrace
+        });
+      } catch (error) {
+        this.diagnosticsLogger?.warn?.(
+          summarizeStudyPlanPayloadShape(generated.value),
+          "Relay study-plan candidate could not be normalized."
+        );
+        return err({
+          code: "VALIDATION_ERROR",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Study plan candidate failed validation."
+        });
       }
     });
   }
@@ -556,6 +701,21 @@ export class RelayAgentRuntime implements AgentRuntime {
       `Relay runtime returned structured response content for ${operation}.`
     );
 
+    if (Array.isArray(responseContent)) {
+      const extractedValue = extractRelayStructuredValue(responseContent);
+      if (extractedValue !== undefined) {
+        return ok({ responseValue: extractedValue });
+      }
+
+      const extractedText = extractRelayTextContent(responseContent);
+      return extractedText
+        ? ok({ responseText: extractedText })
+        : err({
+            code: "STATE_CONFLICT",
+            message: "Relay runtime array response did not include usable structured content."
+          });
+    }
+
     if (!isRecord(responseContent)) {
       return ok({ responseValue: responseContent });
     }
@@ -586,6 +746,7 @@ export class RelayAgentRuntime implements AgentRuntime {
       }
 
       const textValue =
+        extractRelayTextContent(responseContent) ??
         stringOrUndefined(responseContent.value) ??
         stringOrUndefined(responseContent.text);
       return textValue
@@ -604,6 +765,14 @@ export class RelayAgentRuntime implements AgentRuntime {
   }
 }
 
+function normalize(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function extractInterpretationCandidatePayload(
   value: MasterDataInterpretationCandidate | { interpretation: MasterDataInterpretationCandidate }
 ): unknown {
@@ -615,8 +784,40 @@ function extractInterpretationCandidatePayload(
 }
 
 function extractRelayStructuredValue(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      const extracted = extractRelayStructuredValue(entry);
+      if (extracted !== undefined) {
+        return extracted;
+      }
+    }
+
+    return undefined;
+  }
+
   if (!isRecord(value)) {
     return undefined;
+  }
+
+  if (Array.isArray(value.content)) {
+    const extracted = extractRelayStructuredValue(value.content);
+    if (extracted !== undefined) {
+      return extracted;
+    }
+  }
+
+  if (Array.isArray(value.blocks)) {
+    const extracted = extractRelayStructuredValue(value.blocks);
+    if (extracted !== undefined) {
+      return extracted;
+    }
+  }
+
+  if (isRecord(value.message)) {
+    const extracted = extractRelayStructuredValue(value.message);
+    if (extracted !== undefined) {
+      return extracted;
+    }
   }
 
   if ("valueJson" in value) {
@@ -635,7 +836,60 @@ function extractRelayStructuredValue(value: unknown): unknown {
     return (value as { value: unknown }).value;
   }
 
+  if ("json" in value) {
+    return (value as { json: unknown }).json;
+  }
+
+  if ("data" in value && isRecord((value as { data: unknown }).data)) {
+    return (value as { data: unknown }).data;
+  }
+
   return undefined;
+}
+
+function extractRelayTextContent(value: unknown): string | undefined {
+  if (typeof value === "string") {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    const parts = value
+      .map((entry) => extractRelayTextContent(entry))
+      .filter((entry): entry is string => Boolean(entry && entry.trim()));
+    return parts.length > 0 ? parts.join("\n\n") : undefined;
+  }
+
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  if (Array.isArray(value.content)) {
+    const extracted = extractRelayTextContent(value.content);
+    if (extracted) {
+      return extracted;
+    }
+  }
+
+  if (Array.isArray(value.blocks)) {
+    const extracted = extractRelayTextContent(value.blocks);
+    if (extracted) {
+      return extracted;
+    }
+  }
+
+  if (isRecord(value.message)) {
+    const extracted = extractRelayTextContent(value.message);
+    if (extracted) {
+      return extracted;
+    }
+  }
+
+  return (
+    stringOrUndefined(value.text) ??
+    stringOrUndefined(value.value) ??
+    stringOrUndefined(value.output_text) ??
+    stringOrUndefined(value.markdown)
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -651,6 +905,13 @@ function summarizeResponseContent(value: unknown): {
   topLevelKeys: readonly string[];
   type?: string;
 } {
+  if (Array.isArray(value)) {
+    return {
+      topLevelKeys: [],
+      type: "array"
+    };
+  }
+
   if (!isRecord(value)) {
     return {
       topLevelKeys: [],
@@ -768,6 +1029,315 @@ function inferSubjectFromSourceNames(
   return undefined;
 }
 
+function normalizeStudyPlanGenerationCandidate(
+  value: unknown,
+  context: {
+    context: StudyPlanningContext;
+  }
+): Pick<StudyPlanGenerationCandidate, "artifactContent" | "assumptions" | "childTaskSummaries" | "decisions"> {
+  const payload = unwrapStudyPlanGenerationPayload(value);
+  if (!isRecord(payload)) {
+    throw new Error("Study plan candidate did not contain a structured object.");
+  }
+
+  const artifactContent = normalizeStudyPlanArtifactContent(payload, context.context);
+  const assumptions = normalizeStudyPlanAssumptions(payload.assumptions);
+  const childTaskSummaries = normalizeStudyPlanStringArray(
+    payload.childTaskSummaries,
+    artifactContent.sessions.map(
+      (session) => `Prepare a focused ${session.topic} study block with retrieval and self-check.`
+    )
+  );
+  const decisions = normalizeStudyPlanStringArray(payload.decisions, []);
+
+  return {
+    artifactContent,
+    assumptions,
+    childTaskSummaries,
+    decisions
+  };
+}
+
+function summarizeStudyPlanPayloadShape(value: unknown): {
+  artifactCandidateKeys: readonly string[];
+  nestedCandidateKeys: Record<string, readonly string[]>;
+  topLevelKeys: readonly string[];
+} {
+  if (!isRecord(value)) {
+    return {
+      topLevelKeys: [],
+      artifactCandidateKeys: [],
+      nestedCandidateKeys: {}
+    };
+  }
+
+  const nestedCandidateKeys: Record<string, readonly string[]> = {};
+  for (const key of [
+    "artifactContent",
+    "content",
+    "artifact",
+    "studyPlan",
+    "plan",
+    "output",
+    "value"
+  ]) {
+    const candidate = value[key];
+    if (isRecord(candidate)) {
+      nestedCandidateKeys[key] = Object.keys(candidate).sort();
+    }
+  }
+
+  return {
+    topLevelKeys: Object.keys(value).sort(),
+    artifactCandidateKeys: Object.keys(extractStudyPlanArtifactRecord(value) ?? {}).sort(),
+    nestedCandidateKeys
+  };
+}
+
+function unwrapStudyPlanGenerationPayload(value: unknown): unknown {
+  if (!isRecord(value)) {
+    return value;
+  }
+
+  const nestedCandidates = [
+    value.studyPlan,
+    value.plan,
+    value.candidate,
+    value.payload,
+    value.artifact,
+    value.content,
+    value.output
+  ];
+  for (const candidate of nestedCandidates) {
+    if (
+      isRecord(candidate) &&
+      (
+        "artifactContent" in candidate ||
+        "summary" in candidate ||
+        "sessions" in candidate ||
+        "content" in candidate ||
+        "artifact" in candidate
+      )
+    ) {
+      return candidate;
+    }
+  }
+
+  return value;
+}
+
+function normalizeStudyPlanArtifactContent(
+  payload: Record<string, unknown>,
+  context: StudyPlanningContext
+): StudyPlanGenerationCandidate["artifactContent"] {
+  const directArtifactContent = extractStudyPlanArtifactRecord(payload) ?? payload;
+  const rawSessions = extractStudyPlanSessions(directArtifactContent);
+  const summary =
+    stringOrUndefined(directArtifactContent.summary) ??
+    stringOrUndefined(directArtifactContent.artifactSummary) ??
+    stringOrUndefined(directArtifactContent.studyPlanSummary) ??
+    stringOrUndefined(directArtifactContent.summaryText) ??
+    stringOrUndefined(directArtifactContent.overview) ??
+    stringOrUndefined(directArtifactContent.planSummary) ??
+    (rawSessions.length > 0
+      ? `${context.learnerName} will follow a one-week plan focused on ${context.focusTopics.join(", ")}.`
+      : undefined);
+
+  if (!summary) {
+    throw new Error("Study plan candidate did not include an artifact summary.");
+  }
+
+  if (rawSessions.length === 0) {
+    throw new Error("Study plan candidate did not include any study sessions.");
+  }
+
+  const sessions = rawSessions
+    .map((session, index) => normalizeStudyPlanSession(session, index, context))
+    .filter((session): session is StudyPlanGenerationCandidate["artifactContent"]["sessions"][number] =>
+      Boolean(session)
+    );
+
+  if (sessions.length === 0) {
+    throw new Error("Study plan candidate did not include any valid study sessions.");
+  }
+
+  return {
+    summary,
+    sessions,
+    checkpoints: normalizeStudyPlanStringArray(
+      directArtifactContent.checkpoints ??
+        directArtifactContent.reviewCheckpoints ??
+        directArtifactContent.checks ??
+        directArtifactContent.successChecks,
+      []
+    ),
+    notes: normalizeStudyPlanStringArray(
+      directArtifactContent.notes ??
+        directArtifactContent.studyNotes ??
+        directArtifactContent.tips ??
+        directArtifactContent.guidance,
+      []
+    )
+  };
+}
+
+function extractStudyPlanArtifactRecord(value: Record<string, unknown>): Record<string, unknown> | undefined {
+  const candidates: unknown[] = [
+    value.artifactContent,
+    value.content,
+    value.artifact,
+    value.studyPlan,
+    value.plan,
+    value.output,
+    value.value
+  ];
+
+  for (const candidate of candidates) {
+    if (!isRecord(candidate)) {
+      continue;
+    }
+
+    if (
+      "summary" in candidate ||
+      "artifactSummary" in candidate ||
+      "studyPlanSummary" in candidate ||
+      "summaryText" in candidate ||
+      "sessions" in candidate ||
+      "studySessions" in candidate ||
+      "sessionPlan" in candidate ||
+      "dailyPlan" in candidate ||
+      "planSummary" in candidate ||
+      "overview" in candidate
+    ) {
+      return candidate;
+    }
+
+    const nested = extractStudyPlanArtifactRecord(candidate);
+    if (nested) {
+      return nested;
+    }
+  }
+
+  return undefined;
+}
+
+function extractStudyPlanSessions(value: Record<string, unknown>): Array<Record<string, unknown>> {
+  const candidates = [
+    value.sessions,
+    value.studySessions,
+    value.weeklySessions,
+    value.sessionPlan,
+    value.dailyPlan,
+    value.schedule,
+    value.plan
+  ];
+
+  for (const candidate of candidates) {
+    if (Array.isArray(candidate)) {
+      return candidate.filter(isRecord);
+    }
+
+    if (isRecord(candidate)) {
+      const nestedArrays = [
+        candidate.sessions,
+        candidate.studySessions,
+        candidate.weeklySessions,
+        candidate.sessionPlan,
+        candidate.dailyPlan
+      ];
+      for (const nested of nestedArrays) {
+        if (Array.isArray(nested)) {
+          return nested.filter(isRecord);
+        }
+      }
+    }
+  }
+
+  return [];
+}
+
+function normalizeStudyPlanSession(
+  session: Record<string, unknown>,
+  index: number,
+  context: StudyPlanningContext
+):
+  | StudyPlanGenerationCandidate["artifactContent"]["sessions"][number]
+  | undefined {
+  const fallbackDay = context.schedule.find((entry) => entry.minutes > 0)?.day ?? context.schedule[0]?.day;
+  const fallbackTopic = context.focusTopics[index % context.focusTopics.length] ?? context.focusTopics[0];
+  const day = stringOrUndefined(session.day) ?? fallbackDay;
+  const topic = stringOrUndefined(session.topic) ?? fallbackTopic;
+  const activity = stringOrUndefined(session.activity);
+  const outcome = stringOrUndefined(session.outcome);
+  const minutes = numberOrUndefined(session.minutes);
+
+  if (!day || !topic || !activity || !outcome || minutes === undefined) {
+    return undefined;
+  }
+
+  return {
+    day: day as StudyPlanGenerationCandidate["artifactContent"]["sessions"][number]["day"],
+    minutes,
+    topic,
+    activity,
+    outcome
+  };
+}
+
+function normalizeStudyPlanAssumptions(
+  value: unknown
+): StudyPlanGenerationCandidate["assumptions"] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((entry, index) => {
+      if (typeof entry === "string" && entry.trim()) {
+        return {
+          id: `assumption_${index + 1}`,
+          statement: entry.trim()
+        };
+      }
+
+      if (!isRecord(entry)) {
+        return undefined;
+      }
+
+      const statement =
+        stringOrUndefined(entry.statement) ??
+        stringOrUndefined(entry.assumption) ??
+        stringOrUndefined(entry.text);
+      if (!statement) {
+        return undefined;
+      }
+
+      return {
+        id: stringOrUndefined(entry.id) ?? `assumption_${index + 1}`,
+        statement
+      };
+    })
+    .filter(
+      (
+        entry
+      ): entry is StudyPlanGenerationCandidate["assumptions"][number] => Boolean(entry)
+    );
+}
+
+function normalizeStudyPlanStringArray(
+  value: unknown,
+  fallback: readonly string[]
+): string[] {
+  if (!Array.isArray(value)) {
+    return [...fallback];
+  }
+
+  const strings = value
+    .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
+    .filter(Boolean);
+  return strings.length > 0 ? strings : [...fallback];
+}
+
 function normalizeInitialAssessmentGenerationCandidate(
   value: unknown,
   context: {
@@ -818,6 +1388,76 @@ function normalizeInitialAssessmentGenerationCandidate(
       contextTopic: context.contextTopic,
       questionCount: context.questionCount
     })
+  };
+}
+
+function normalizeAssessmentAttemptEvaluationCandidate(
+  value: unknown,
+  context: {
+    assessment: {
+      items: readonly AssessmentItem[];
+      topic: string;
+    };
+    contextTopic: string;
+    responses: readonly {
+      answer: string;
+      itemId: string;
+    }[];
+  }
+): Pick<AssessmentAttemptEvaluationCandidate, "itemResults" | "knowledgeGaps" | "score"> {
+  const payload = unwrapAssessmentAttemptEvaluationPayload(value);
+  if (!isRecord(payload)) {
+    throw new Error("Assessment attempt evaluation did not contain a structured object.");
+  }
+
+  const responseByItemId = new Map(
+    context.responses.map((response) => [response.itemId, response.answer])
+  );
+  const itemRecords = extractAssessmentEvaluationItemRecords(payload);
+  const itemResults =
+    itemRecords.length > 0
+      ? itemRecords
+          .map((record, index) =>
+            normalizeAssessmentEvaluationItemResult(record, index, {
+              assessmentItems: context.assessment.items,
+              contextTopic: context.contextTopic,
+              responseByItemId
+            })
+          )
+          .filter((item): item is EvaluationItemResult => Boolean(item))
+      : context.assessment.items.map((item) => {
+          const answer = responseByItemId.get(item.id) ?? "";
+          const correct = normalize(answer) === normalize(item.canonicalAnswer);
+          return {
+            itemId: item.id,
+            correct,
+            feedback: correct
+              ? `Secure response for ${item.topic}.`
+              : `Review the underlying idea for ${item.topic} and revisit the missed method.`,
+            topic: item.topic
+          } satisfies EvaluationItemResult;
+        });
+
+  if (itemResults.length === 0) {
+    throw new Error("Assessment attempt evaluation did not return a valid itemResults array.");
+  }
+
+  const score =
+    numberOrUndefined(payload.score) ??
+    numberOrUndefined(payload.percentage) ??
+    numberOrUndefined(payload.fractionCorrect) ??
+    deriveAssessmentEvaluationScore(itemResults);
+
+  const knowledgeGaps = normalizeAssessmentKnowledgeGaps(payload, {
+    contextTopic: context.contextTopic,
+    itemResults,
+    score
+  });
+
+  return {
+    score,
+    itemResults,
+    knowledgeGaps
   };
 }
 
@@ -945,7 +1585,11 @@ function buildRelayCommand(input: {
     name: relayCommandName(input.operation),
     inputSchema: relayInputSchema(input.operation),
     expectedOutputSchema: input.expectedOutputSchema,
-    input: input.payload,
+    input: buildRelayCommandInput({
+      expectedOutputSchema: input.expectedOutputSchema,
+      operation: input.operation,
+      payload: input.payload
+    }),
     previewText: relayPreviewText(input.operation, input.payload)
   };
 }
@@ -964,6 +1608,37 @@ function unwrapInitialAssessmentPayload(value: unknown): unknown {
 
   for (const candidate of nestedCandidates) {
     if (isRecord(candidate) && ("items" in candidate || "artifactContent" in candidate || "questions" in candidate)) {
+      return candidate;
+    }
+  }
+
+  return value;
+}
+
+function unwrapAssessmentAttemptEvaluationPayload(value: unknown): unknown {
+  if (!isRecord(value)) {
+    return value;
+  }
+
+  const nestedCandidates = [
+    value.evaluation,
+    value.assessmentEvaluation,
+    value.candidate,
+    value.payload
+  ];
+
+  for (const candidate of nestedCandidates) {
+    if (
+      isRecord(candidate) &&
+      (
+        "itemResults" in candidate ||
+        "results" in candidate ||
+        "questionResults" in candidate ||
+        "knowledgeGaps" in candidate ||
+        "focusAreas" in candidate ||
+        "gaps" in candidate
+      )
+    ) {
       return candidate;
     }
   }
@@ -1000,6 +1675,244 @@ function extractPromptSpecs(
   }
 
   return [];
+}
+
+function extractAssessmentEvaluationItemRecords(
+  payload: Record<string, unknown>
+): Array<Record<string, unknown>> {
+  const candidates = [
+    payload.itemResults,
+    payload.results,
+    payload.questionResults,
+    payload.items,
+    payload.marking
+  ];
+
+  for (const candidate of candidates) {
+    if (Array.isArray(candidate)) {
+      return candidate.filter(isRecord);
+    }
+  }
+
+  return [];
+}
+
+function normalizeAssessmentEvaluationItemResult(
+  record: Record<string, unknown>,
+  index: number,
+  context: {
+    assessmentItems: readonly AssessmentItem[];
+    contextTopic: string;
+    responseByItemId: Map<string, string>;
+  }
+): EvaluationItemResult | undefined {
+  const assessmentItem =
+    context.assessmentItems.find((item) =>
+      item.id ===
+      (stringOrUndefined(record.itemId) ??
+        stringOrUndefined(record.id) ??
+        stringOrUndefined(record.questionId))
+    ) ?? context.assessmentItems[index];
+  const itemId =
+    stringOrUndefined(record.itemId) ??
+    stringOrUndefined(record.id) ??
+    stringOrUndefined(record.questionId) ??
+    assessmentItem?.id;
+
+  if (!itemId) {
+    return undefined;
+  }
+
+  const answer = context.responseByItemId.get(itemId) ?? "";
+  const correct = inferAssessmentEvaluationCorrectness(record, assessmentItem, answer);
+  const topic =
+    stringOrUndefined(record.topic) ??
+    stringOrUndefined(record.focusArea) ??
+    assessmentItem?.topic ??
+    context.contextTopic;
+  const feedback =
+    stringOrUndefined(record.feedback) ??
+    stringOrUndefined(record.commentary) ??
+    stringOrUndefined(record.comment) ??
+    stringOrUndefined(record.reasoning) ??
+    stringOrUndefined(record.explanation) ??
+    (correct
+      ? `Secure response for ${topic}.`
+      : `Review the underlying idea for ${topic} and revisit the missed method.`);
+
+  return {
+    itemId,
+    correct,
+    feedback,
+    topic
+  };
+}
+
+function inferAssessmentEvaluationCorrectness(
+  record: Record<string, unknown>,
+  assessmentItem: AssessmentItem | undefined,
+  answer: string
+): boolean {
+  if (typeof record.correct === "boolean") {
+    return record.correct;
+  }
+
+  if (typeof record.isCorrect === "boolean") {
+    return record.isCorrect;
+  }
+
+  const verdict =
+    stringOrUndefined(record.verdict) ??
+    stringOrUndefined(record.outcome) ??
+    stringOrUndefined(record.status);
+  if (verdict) {
+    const normalizedVerdict = normalize(verdict);
+    if (normalizedVerdict.includes("partial")) {
+      return false;
+    }
+    if (
+      normalizedVerdict.includes("incorrect") ||
+      normalizedVerdict.includes("wrong") ||
+      normalizedVerdict.includes("missing")
+    ) {
+      return false;
+    }
+    if (
+      normalizedVerdict.includes("correct") ||
+      normalizedVerdict.includes("secure") ||
+      normalizedVerdict.includes("right")
+    ) {
+      return true;
+    }
+  }
+
+  const score =
+    numberOrUndefined(record.score) ??
+    numberOrUndefined(record.itemScore) ??
+    numberOrUndefined(record.credit);
+  if (score !== undefined) {
+    return score >= 1;
+  }
+
+  return assessmentItem
+    ? normalize(answer) === normalize(assessmentItem.canonicalAnswer)
+    : false;
+}
+
+function normalizeAssessmentKnowledgeGaps(
+  payload: Record<string, unknown>,
+  context: {
+    contextTopic: string;
+    itemResults: readonly EvaluationItemResult[];
+    score: number;
+  }
+): AssessmentAttemptEvaluationCandidate["knowledgeGaps"] {
+  const rawGaps =
+    normalizeRawGapArray(payload.knowledgeGaps) ??
+    normalizeRawGapArray(payload.focusAreas) ??
+    normalizeRawGapArray(payload.gaps) ??
+    normalizeRawGapArray(payload.misconceptions) ??
+    [];
+
+  const normalizedGaps = rawGaps
+    .map((gap, index) => normalizeAssessmentKnowledgeGap(gap, index, context))
+    .filter((gap): gap is AssessmentAttemptEvaluationCandidate["knowledgeGaps"][number] => Boolean(gap));
+
+  if (normalizedGaps.length > 0) {
+    return normalizedGaps;
+  }
+
+  return context.itemResults
+    .filter((result) => !result.correct)
+    .map((result) => ({
+      topic: result.topic,
+      description: `Needs more support with ${result.topic}.`,
+      evidence: `Missed assessment item ${result.itemId}.`,
+      severity: context.score < 0.5 ? "high" : "medium"
+    }));
+}
+
+function normalizeRawGapArray(value: unknown): Array<Record<string, unknown> | string> | undefined {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+
+  return value.filter(
+    (entry): entry is Record<string, unknown> | string =>
+      typeof entry === "string" || isRecord(entry)
+  );
+}
+
+function normalizeAssessmentKnowledgeGap(
+  gap: Record<string, unknown> | string,
+  index: number,
+  context: {
+    contextTopic: string;
+    itemResults: readonly EvaluationItemResult[];
+    score: number;
+  }
+): AssessmentAttemptEvaluationCandidate["knowledgeGaps"][number] | undefined {
+  if (typeof gap === "string") {
+    return {
+      topic: context.contextTopic,
+      description: gap,
+      evidence:
+        context.itemResults.find((result) => !result.correct)?.feedback ??
+        `Assessment evidence identified focus area ${index + 1}.`,
+      severity: context.score < 0.5 ? "high" : "medium"
+    };
+  }
+
+  const topic =
+    stringOrUndefined(gap.topic) ??
+    stringOrUndefined(gap.focusArea) ??
+    stringOrUndefined(gap.area) ??
+    context.contextTopic;
+  const description =
+    stringOrUndefined(gap.description) ??
+    stringOrUndefined(gap.title) ??
+    stringOrUndefined(gap.focus) ??
+    stringOrUndefined(gap.summary) ??
+    stringOrUndefined(gap.misconception) ??
+    topic;
+  const evidence =
+    stringOrUndefined(gap.evidence) ??
+    stringOrUndefined(gap.reason) ??
+    stringOrUndefined(gap.rationale) ??
+    stringOrUndefined(gap.feedback) ??
+    `Assessment evidence identified a gap in ${topic}.`;
+
+  if (!description) {
+    return undefined;
+  }
+
+  return {
+    topic,
+    description,
+    evidence,
+    severity: normalizeKnowledgeGapSeverity(gap.severity, context.score)
+  };
+}
+
+function normalizeKnowledgeGapSeverity(
+  value: unknown,
+  score: number
+): KnowledgeGapSeverity {
+  if (value === "low" || value === "medium" || value === "high") {
+    return value;
+  }
+
+  return score < 0.5 ? "high" : "medium";
+}
+
+function deriveAssessmentEvaluationScore(
+  itemResults: readonly EvaluationItemResult[]
+): number {
+  if (itemResults.length === 0) {
+    return 0;
+  }
+
+  return itemResults.filter((result) => result.correct).length / itemResults.length;
 }
 
 function normalizeAssessmentItems(input: {
@@ -1172,6 +2085,8 @@ function stageForOperation(operation: string): string {
     case "generateInitialAssessment":
     case "evaluateAssessmentAttempt":
       return "diagnosis";
+    case "generateLearningLoopBatch":
+      return "loop-batching";
     case "generateStudyPlan":
       return "planning";
     case "generatePracticeActivity":
@@ -1184,41 +2099,15 @@ function stageForOperation(operation: string): string {
 }
 
 function relayCommandName(operation: string): string {
-  switch (operation) {
-    case "interpretMasterData":
-      return "loop_study.interpret_master_data";
-    case "generateInitialAssessment":
-      return "loop_study.generate_initial_assessment";
-    case "evaluateAssessmentAttempt":
-      return "loop_study.evaluate_assessment_attempt";
-    case "generateStudyPlan":
-      return "loop_study.generate_study_plan";
-    case "generatePracticeActivity":
-      return "loop_study.generate_practice_activity";
-    case "evaluateActiveReviewSession":
-      return "loop_study.evaluate_active_review_session";
-    default:
-      return `loop_study.${operation}`;
-  }
+  return isEvaluationOperation(operation)
+    ? "runtime.evaluate_structured_response"
+    : "runtime.generate_structured_candidate";
 }
 
 function relayInputSchema(operation: string): string {
-  switch (operation) {
-    case "interpretMasterData":
-      return "LoopStudyInterpretMasterDataInput.v1";
-    case "generateInitialAssessment":
-      return "LoopStudyGenerateInitialAssessmentInput.v1";
-    case "evaluateAssessmentAttempt":
-      return "LoopStudyEvaluateAssessmentAttemptInput.v1";
-    case "generateStudyPlan":
-      return "LoopStudyGenerateStudyPlanInput.v1";
-    case "generatePracticeActivity":
-      return "LoopStudyGeneratePracticeActivityInput.v1";
-    case "evaluateActiveReviewSession":
-      return "LoopStudyEvaluateActiveReviewSessionInput.v1";
-    default:
-      return "LoopStudyCommandInput.v1";
-  }
+  return isEvaluationOperation(operation)
+    ? "RuntimeEvaluateStructuredResponseInput.v1"
+    : "RuntimeGenerateStructuredCandidateInput.v1";
 }
 
 function relayPreviewText(operation: string, payload: unknown): string {
@@ -1233,6 +2122,8 @@ function relayPreviewText(operation: string, payload: unknown): string {
       return `loop.study requested assessment evaluation for ${String(packet.contextTopic ?? "the current topic")}.`;
     case "generateStudyPlan":
       return `loop.study requested a study plan for ${String((packet.context as Record<string, unknown> | undefined)?.focusTopics ?? "current focus topics")}.`;
+    case "generateLearningLoopBatch":
+      return `loop.study requested a short loop batch for ${String((packet.materialInterpretation as Record<string, unknown> | undefined)?.mainTopic ?? "the current topic")}.`;
     case "generatePracticeActivity":
       return `loop.study requested a practice activity for ${String(packet.topic ?? "the current topic")}.`;
     case "evaluateActiveReviewSession":
@@ -1240,4 +2131,260 @@ function relayPreviewText(operation: string, payload: unknown): string {
     default:
       return "loop.study requested a structured runtime operation.";
   }
+}
+
+function buildRelayCommandInput(input: {
+  expectedOutputSchema: string;
+  operation: string;
+  payload: unknown;
+}): Record<string, unknown> {
+  const payload = isRecord(input.payload) ? input.payload : {};
+
+  return {
+    candidateKind: candidateKindForOperation(input.operation),
+    purpose: purposeForOperation(input.operation),
+    expectedOutputSchema: input.expectedOutputSchema,
+    outputContract: outputContractForOperation(input.operation, input.expectedOutputSchema),
+    qualityRules: qualityRulesForOperation(input.operation),
+    ...payload
+  };
+}
+
+function candidateKindForOperation(operation: string): string {
+  switch (operation) {
+    case "interpretMasterData":
+      return "master_data_interpretation";
+    case "generateInitialAssessment":
+      return "initial_assessment";
+    case "evaluateAssessmentAttempt":
+      return "assessment_attempt_evaluation";
+    case "generateStudyPlan":
+      return "study_plan";
+    case "generateLearningLoopBatch":
+      return "learning_loop_batch";
+    case "generatePracticeActivity":
+      return "practice_activity";
+    case "evaluateActiveReviewSession":
+      return "active_review_evaluation";
+    default:
+      return "structured_candidate";
+  }
+}
+
+function purposeForOperation(operation: string): string {
+  switch (operation) {
+    case "interpretMasterData":
+      return "Interpret uploaded study material into a validated structured study summary for loop.study.";
+    case "generateInitialAssessment":
+      return "Generate a diagnostic check-up grounded in the accepted material interpretation and source evidence.";
+    case "evaluateAssessmentAttempt":
+      return "Evaluate a learner's submitted assessment attempt against the generated check-up and accepted study context.";
+    case "generateStudyPlan":
+      return "Generate a structured study plan from the learner context and accepted material interpretations.";
+    case "generateLearningLoopBatch":
+      return "Generate a short batch of source-grounded learning loops from diagnosed gaps and the accepted study interpretation.";
+    case "generatePracticeActivity":
+      return "Generate an active-recall practice activity grounded in selected evidence and accepted objectives.";
+    case "evaluateActiveReviewSession":
+      return "Evaluate structured evidence from an active review session and return learner-safe guidance.";
+    default:
+      return "Generate a structured candidate for the current loop.study runtime operation.";
+  }
+}
+
+function outputContractForOperation(
+  operation: string,
+  expectedOutputSchema: string
+): Record<string, unknown> {
+  if (operation === "interpretMasterData") {
+    return {
+      schema: "MasterDataInterpretationCandidate.v1",
+      fields: {
+        schema: '"MasterDataInterpretationCandidate.v1"',
+        detectedSubject: "string",
+        detectedYearGroup: "string",
+        mainTopic: "string",
+        subtopics: ["string"],
+        keyPeople: ["string"],
+        keyTerms: ["string"],
+        importantDates: ["string"],
+        processes: ["string"],
+        learnerFacingMaterialSummary: "string",
+        learningObjectives: [
+          {
+            id: "string",
+            objective: "string",
+            sourceRefs: ["string"]
+          }
+        ],
+        sourceMap: [
+          {
+            sourceRef: "string",
+            excerpt: "string"
+          }
+        ],
+        items: [
+          {
+            subject: "string",
+            yearGroup: "string",
+            topic: "string",
+            subtopic: "string",
+            itemType: "fact|person|key_term|date|cause|event|consequence|legacy",
+            content: "string",
+            sourceRef: "string",
+            term: "string?",
+            definition: "string?",
+            person: "string?",
+            date: "string?"
+          }
+        ]
+      },
+      example: {
+        schema: "MasterDataInterpretationCandidate.v1",
+        detectedSubject: "Geography",
+        detectedYearGroup: "Year 7",
+        mainTopic: "Coasts",
+        subtopics: ["Erosion", "Coastal Defences"],
+        keyPeople: [],
+        keyTerms: ["erosion", "sea wall"],
+        importantDates: [],
+        processes: ["erosion", "transportation", "deposition"],
+        learnerFacingMaterialSummary:
+          "Coasts explains how erosion, transportation, and deposition shape coastlines and how hard and soft engineering protect them.",
+        learningObjectives: [
+          {
+            id: "objective_1",
+            objective: "Explain how erosion, transportation, and deposition change coastlines.",
+            sourceRefs: ["Coasts > Erosion > fact-1"]
+          }
+        ],
+        sourceMap: [
+          {
+            sourceRef: "Coasts > Erosion > fact-1",
+            excerpt: "Waves force air and water into cracks so pressure breaks rock off the cliff."
+          }
+        ],
+        items: [
+          {
+            subject: "Geography",
+            yearGroup: "Year 7",
+            topic: "Coasts",
+            subtopic: "Erosion",
+            itemType: "fact",
+            content: "Waves force air and water into cracks so pressure breaks rock off the cliff.",
+            sourceRef: "Coasts > Erosion > fact-1"
+          }
+        ]
+      }
+    };
+  }
+
+  if (operation === "generateLearningLoopBatch") {
+    return {
+      schema: "LearningLoopBatchCandidate.v1",
+      fields: {
+        schema: '"LearningLoopBatchCandidate.v1"',
+        overview: "string",
+        targetDurationMinutes: "number",
+        units: [
+          {
+            focus: "string",
+            reason: "string",
+            objectiveRefs: ["string"],
+            sourceRefs: ["string"],
+            targetKnowledgeGapIds: ["string"],
+            shortExplanation: "string",
+            learnerTask: "string",
+            quickCheckQuestions: [{ prompt: "string" }],
+            reviewItems: [{ prompt: "string", answer: "string" }],
+            state: "locked|ready|in_progress|completed"
+          }
+        ]
+      },
+      example: {
+        schema: "LearningLoopBatchCandidate.v1",
+        overview: "Start with a short loop on coastal processes before moving into retrieval review.",
+        targetDurationMinutes: 5,
+        units: [
+          {
+            focus: "Coastal processes",
+            reason: "This gap was identified in the diagnostic check-up.",
+            objectiveRefs: ["objective_1"],
+            sourceRefs: ["Coasts > Erosion > fact-1"],
+            targetKnowledgeGapIds: ["gap_1"],
+            shortExplanation:
+              "Erosion, transportation, and deposition change coastlines over time.",
+            learnerTask:
+              "Spend 5 minutes explaining the three processes in your own words, then write one example from memory.",
+            quickCheckQuestions: [
+              {
+                prompt: "How would you explain erosion without copying the notes?"
+              }
+            ],
+            reviewItems: [
+              {
+                prompt: "What should you remember about coastal erosion?",
+                answer: "Waves wear away rock and move sediment along the coast."
+              }
+            ],
+            state: "ready"
+          }
+        ]
+      }
+    };
+  }
+
+  return {
+    schema: expectedOutputSchema
+  };
+}
+
+function qualityRulesForOperation(operation: string): string[] {
+  switch (operation) {
+    case "interpretMasterData":
+      return [
+        "Return schema exactly as MasterDataInterpretationCandidate.v1.",
+        "learningObjectives must be objects with id, objective, and sourceRefs; do not return strings.",
+        "Use empty arrays, not null or omitted fields, when keyPeople, importantDates, or processes are absent.",
+        "Every learning objective and structured item must include source refs that point to sourceMap entries."
+      ];
+    case "generateInitialAssessment":
+      return [
+        "Ground every generated question in the accepted interpretation and provided source evidence.",
+        "Include objective refs and source refs where the assessment schema allows them.",
+        "Do not leak answers in prompts or copy source bullets verbatim as the learner task."
+      ];
+    case "generatePracticeActivity":
+      return [
+        "Generate active-recall prompts rather than copying source text directly.",
+        "Reject flashcards with identical front and back text.",
+        "Keep source grounding available through the provided evidence."
+      ];
+    case "generateStudyPlan":
+      return [
+        "Base the plan on the learner context and accepted interpretation objectives.",
+        "Return a structured plan rather than free-form coaching prose."
+      ];
+    case "generateLearningLoopBatch":
+      return [
+        "Every loop unit must target one or more diagnosed gaps and reference accepted objectives and source refs.",
+        "Each learnerTask must name one clear action and must not be a vague instruction like revise the topic.",
+        "Quick checks must not leak answers, and review items must use active recall."
+      ];
+    case "evaluateAssessmentAttempt":
+    case "evaluateActiveReviewSession":
+      return [
+        "Evaluate only against the supplied structured evidence.",
+        "Return learner-safe feedback without leaking hidden scoring internals."
+      ];
+    default:
+      return [];
+  }
+}
+
+function isEvaluationOperation(operation: string): boolean {
+  return (
+    operation === "evaluateAssessmentAttempt" ||
+    operation === "evaluateActiveReviewSession"
+  );
 }
